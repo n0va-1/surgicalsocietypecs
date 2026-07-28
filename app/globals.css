@@ -192,6 +192,9 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 .generated-code-note { display:flex; align-items:center; gap:10px; margin:2px 0 16px; padding:11px 12px; border:1px solid var(--line); border-radius:4px; background:var(--paper); }
 .generated-code-note span { flex:0 0 auto; padding:5px 8px; border-radius:12px; background:var(--burgundy-soft); color:var(--burgundy-deep); font-size:8px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; }
 .generated-code-note p { margin:0; color:var(--muted); font-size:9px; line-height:1.45; }
+.staff-approval-note { display:grid; grid-template-columns:28px 1fr; gap:10px; align-items:center; margin:0 0 16px; padding:11px 12px; border:1px solid var(--line); border-radius:4px; background:var(--paper); }
+.staff-approval-note > span { width:28px; height:28px; display:grid; place-items:center; border-radius:50%; background:#e8f3ed; color:var(--green); font-size:11px; }
+.staff-approval-note p { margin:0; color:var(--muted); font-size:9px; line-height:1.5; }
 .auth-brand { display:flex; align-items:center; gap:13px; position:relative; z-index:1; }
 .auth-brand .official-logo { background:#fff; box-shadow:0 0 0 1px #ffffff40; }
 .auth-brand strong { display:block; font-family:Georgia,"Times New Roman",serif; font-size:17px; font-weight:400; }
@@ -439,9 +442,9 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 .code-panel form > .primary-button { width:max-content; min-width:190px; }
 .code-list { border-top:1px solid var(--line); }
 .code-list > .modal-copy { margin:12px 0 0; }
-.code-list article { min-height:55px; display:grid; grid-template-columns:90px 1fr auto; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
+.code-list article { min-height:55px; display:grid; grid-template-columns:minmax(145px,.7fr) 1fr auto; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
 .code-list article:last-child { border-bottom:0; }
-.code-list code { color:var(--burgundy); font-size:12px; letter-spacing:1.5px; }
+.code-list code { color:var(--burgundy); font-size:12px; letter-spacing:1px; overflow-wrap:anywhere; }
 .code-list strong,.code-list small { display:block; }
 .code-list strong { font-size:9px; }
 .code-list small { margin-top:3px; color:var(--muted); font-size:7px; }

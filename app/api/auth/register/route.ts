@@ -17,23 +17,19 @@ export async function POST(request: Request) {
   const code = body?.code?.trim();
   const requestedRole = body?.requestedArea === "staff" ? "demonstrator" : "student";
 
-  if (!email || !emailPattern.test(email) || !fullName || fullName.length > 120 || !password || !isStrongPassword(password) || !code || body?.privacyAccepted !== true) {
+  if (!email || !emailPattern.test(email) || !fullName || fullName.length > 120 || !password || !isStrongPassword(password) || (requestedRole === "student" && !code) || body?.privacyAccepted !== true) {
     return NextResponse.json({ error: "Please check all registration fields." }, { status: 400 });
-  }
-  if (requestedRole === "demonstrator" && !/^\d{6,}$/.test(code)) {
-    return NextResponse.json({ error: "Staff codes must contain at least six digits." }, { status: 400 });
   }
 
   const admin = createSupabaseAdminClient();
   const { data: existing } = await admin.from("profiles").select("id").eq("email", email).maybeSingle();
   if (existing) return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });
-  const { data: redemption, error: codeError } = await admin.rpc("redeem_invite_code", {
-    submitted_code: code,
-    requested_role: requestedRole,
-  });
+  const { data: redemption, error: codeError } = requestedRole === "student"
+    ? await admin.rpc("redeem_invite_code", { submitted_code: code, requested_role: "student" })
+    : await admin.rpc("redeem_staff_invitation", { requested_email: email });
   const invite = Array.isArray(redemption) ? redemption[0] : redemption;
   if (codeError || !invite?.invite_id) {
-    return NextResponse.json({ error: "This access code is invalid, expired or already used." }, { status: 403 });
+    return NextResponse.json({ error: requestedRole === "student" ? "This student code is invalid, expired or full." : "This email has not been approved for staff access, or its approval has expired." }, { status: 403 });
   }
 
   const publicUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -55,7 +51,7 @@ export async function POST(request: Request) {
   await admin.from("profiles").update({
     role: curriculumEditor ? "student" : requestedRole,
     curriculum_editor: curriculumEditor,
-    rank: invite.course_level ?? null,
+    rank: requestedRole === "student" ? invite.course_level ?? null : null,
     privacy_accepted_at: new Date().toISOString(),
     privacy_version: "2026-07-draft",
   }).eq("id", data.user.id);
