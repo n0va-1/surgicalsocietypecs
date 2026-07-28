@@ -6,7 +6,7 @@ import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 export async function GET() {
   if (!await requireRole(["admin"])) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.from("invite_codes").select("id,role,course_level,max_uses,uses,expires_at,revoked_at,created_at").order("created_at", { ascending: false });
+  const { data, error } = await admin.from("invite_codes").select("id,role,course_level,curriculum_editor,max_uses,uses,expires_at,revoked_at,created_at").order("created_at", { ascending: false });
   return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ codes: data });
 }
 
@@ -15,9 +15,10 @@ export async function POST(request: Request) {
   const profile = await requireRole(["admin"]);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (!await consumeRateLimit(request, `invite:${profile.id}`, 30, 3600)) return NextResponse.json({ error: "Code creation limit reached. Please try again later." }, { status: 429 });
-  const body = await request.json().catch(() => null) as null | { code?: string; role?: "student" | "demonstrator"; level?: string; maxUses?: number; expiresAt?: string };
+  const body = await request.json().catch(() => null) as null | { code?: string; role?: "student" | "demonstrator" | "editor"; level?: string; maxUses?: number; expiresAt?: string };
   const code = body?.code?.trim();
   const role = body?.role === "student" ? "student" : "demonstrator";
+  const curriculumEditor = body?.role === "editor";
   if (!code || (role === "demonstrator" && !/^\d{6,}$/.test(code)) || code.length < 6) {
     return NextResponse.json({ error: "Codes must be at least six characters; staff codes must be numeric." }, { status: 400 });
   }
@@ -27,7 +28,12 @@ export async function POST(request: Request) {
     invite_max_uses: Math.max(1, Math.min(body?.maxUses ?? 1, 200)), invite_expires_at: body?.expiresAt ?? new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
     creator_id: profile.id,
   });
-  return error ? NextResponse.json({ error: error.message }, { status: 400 }) : NextResponse.json({ id: data }, { status: 201 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (curriculumEditor) {
+    const { error: editorError } = await admin.from("invite_codes").update({ curriculum_editor: true }).eq("id", data);
+    if (editorError) return NextResponse.json({ error: "The editor permission could not be attached to this code." }, { status: 500 });
+  }
+  return NextResponse.json({ id: data }, { status: 201 });
 }
 
 export async function DELETE(request: Request) {

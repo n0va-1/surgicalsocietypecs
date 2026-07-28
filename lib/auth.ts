@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export type AcademyRole = "student" | "demonstrator" | "admin";
+export type AcademyRole = "student" | "demonstrator" | "admin" | "editor";
 export type AcademyLevel = "beginner" | "intermediate" | "advanced";
 
 export type AcademyProfile = {
@@ -12,6 +12,7 @@ export type AcademyProfile = {
   eligible: boolean;
   is_demo: boolean;
   avatar_path: string | null;
+  curriculum_editor: boolean;
 };
 
 export async function getAuthenticatedProfile() {
@@ -19,12 +20,13 @@ export async function getAuthenticatedProfile() {
   const { data: { user }, error } = await supabase.auth.getUser();
   if (error || !user) return null;
 
-  const { data: profile } = await supabase
+  const { data: storedProfile } = await supabase
     .from("profiles")
-    .select("id,email,full_name,role,rank,eligible,is_demo,avatar_path")
+    .select("id,email,full_name,role,rank,eligible,is_demo,avatar_path,curriculum_editor")
     .eq("id", user.id)
-    .single<AcademyProfile>();
-  return profile ?? null;
+    .single<Omit<AcademyProfile, "role"> & { role: Exclude<AcademyRole, "editor"> }>();
+  if (!storedProfile) return null;
+  return { ...storedProfile, role: storedProfile.curriculum_editor ? "editor" : storedProfile.role } as AcademyProfile;
 }
 
 export async function requireRole(allowed: AcademyRole[]) {

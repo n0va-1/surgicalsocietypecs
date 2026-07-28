@@ -8,14 +8,16 @@ type Language = "en" | "hu";
 type Role = "student" | "staff";
 type AuthMode = "login" | "register";
 type StudentPage = "overview" | "learning" | "submissions" | "achievements" | "announcements" | "profile";
-type StaffPage = "overview" | "students" | "attendance" | "reviews" | "announcements" | "reports" | "admin" | "profile";
+type StaffPage = "overview" | "students" | "attendance" | "reviews" | "announcements" | "reports" | "curriculum" | "admin" | "profile";
 type Modal = "upload" | "lesson" | "feedback" | "forgot" | "notifications" | "certificate" | "review" | "announcement" | "student" | "privacy" | "mfa" | null;
 type StudentRow = [name: string, initials: string, level: string, progress: string, technique: string, id?: string, absences?: number, eligible?: boolean, avatarUrl?: string, avatarEmoji?: string];
 type AnnouncementRow = { id?: string; date: string; title: string; hu: string; text: string; target: string; pinned: boolean; publishedAt?: string };
 type SubmissionRow = { id: string; student_id: string; module_id: string; object_key: string; reflection: string | null; status: string; score: number | null; outcome: string | null; feedback: string | null; created_at: string; module: { id: string; title_en: string; title_hu: string; week: number; level: string } | null; student: { id: string; full_name: string; rank: string } | null };
 type AttendanceSession = { id: string; title: string; session_number: number | null; semester_key: string; starts_at: string };
-type PortalProfile = { role: "student" | "demonstrator" | "admin"; full_name: string; email: string; avatarUrl?: string | null; avatar_emoji?: string | null };
+type PortalProfile = { id: string; role: "student" | "demonstrator" | "admin" | "editor"; full_name: string; email: string; avatarUrl?: string | null; avatar_emoji?: string | null };
 type AttendanceValue = "Present" | "Late" | "Absent";
+type CurriculumAsset = { id: string; module_id: string; kind: "image" | "video"; object_key: string; caption: string | null; url: string | null };
+type CurriculumModule = { id: string; level: "beginner" | "intermediate" | "advanced"; week: number; title_en: string; title_hu: string; introduction_en: string | null; introduction_hu: string | null; technique_en: string | null; technique_hu: string | null; application_en: string | null; application_hu: string | null; equipment_en: string | null; equipment_hu: string | null; steps_en: string[]; steps_hu: string[]; video_url: string | null; published: boolean; assets: CurriculumAsset[] };
 
 const ui = {
   en: {
@@ -211,8 +213,8 @@ const students: StudentRow[] = [
   ["Máté Szabó", "MS", "Intermediate", "71%", "Running suture"],
 ];
 
-function Logo({ compact = false }: { compact?: boolean }) {
-  return <Image className={compact ? "official-logo compact" : "official-logo"} src="/ssp-logo.png" width={112} height={112} alt="Surgical Society Pécs crest" priority />;
+function Logo({ compact = false, login = false }: { compact?: boolean; login?: boolean }) {
+  return <Image className={`official-logo${compact ? " compact" : ""}${login ? " login-logo" : ""}`} src="/ssp-logo.png" width={112} height={112} alt="Surgical Society Pécs crest" priority />;
 }
 
 function initials(name: string) {
@@ -234,11 +236,13 @@ export default function Home() {
   const [accountName, setAccountName] = useState("Anna Nagy");
   const [registrationName, setRegistrationName] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [accountId, setAccountId] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authCode, setAuthCode] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isCurriculumEditor, setIsCurriculumEditor] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [studentPage, setStudentPage] = useState<StudentPage>("overview");
   const [staffPage, setStaffPage] = useState<StaffPage>("overview");
@@ -268,14 +272,17 @@ export default function Home() {
   const [pendingProfile, setPendingProfile] = useState<PortalProfile | null>(null);
   const [mfaMode, setMfaMode] = useState<"enroll" | "verify">("verify");
   const [mfaFactorId, setMfaFactorId] = useState("");
+  const [mfaFactors, setMfaFactors] = useState<Array<{ id: string; label: string }>>([]);
   const [mfaQrCode, setMfaQrCode] = useState("");
   const [mfaSecret, setMfaSecret] = useState("");
   const [mfaCode, setMfaCode] = useState("");
   const [newCode, setNewCode] = useState("");
-  const [inviteRole, setInviteRole] = useState<"student" | "demonstrator">("demonstrator");
+  const [inviteRole, setInviteRole] = useState<"student" | "demonstrator" | "editor">("demonstrator");
   const [inviteLevel, setInviteLevel] = useState<"beginner" | "intermediate" | "advanced">("beginner");
   const [inviteMaxUses, setInviteMaxUses] = useState(1);
   const [staffCodes, setStaffCodes] = useState<Array<{ id?: string; code: string; status: string; expires: string }>>([]);
+  const [curriculumRecords, setCurriculumRecords] = useState<CurriculumModule[]>([]);
+  const [selectedCurriculumId, setSelectedCurriculumId] = useState("");
   const fileInput = useRef<HTMLInputElement>(null);
   const profilePhotoInput = useRef<HTMLInputElement>(null);
   const selectedUpload = useRef<File | null>(null);
@@ -292,8 +299,10 @@ export default function Home() {
     const actualRole: Role = profile.role === "student" ? "student" : "staff";
     setRole(actualRole);
     setIsAdmin(profile.role === "admin");
+    setIsCurriculumEditor(profile.role === "editor");
     setAccountName(profile.full_name);
     setAccountEmail(profile.email);
+    setAccountId(profile.id);
     setAccountAvatarUrl(profile.avatarUrl ?? "");
     setAccountAvatarEmoji(profile.avatar_emoji ?? "");
     setPendingProfile(null);
@@ -301,7 +310,7 @@ export default function Home() {
     setModal(null);
     setAuthenticated(true);
     setStudentPage("overview");
-    setStaffPage("overview");
+    setStaffPage(profile.role === "editor" ? "curriculum" : "overview");
   }, []);
 
   const beginMfa = useCallback(async (profile: PortalProfile) => {
@@ -309,22 +318,36 @@ export default function Home() {
     const supabase = getSupabaseBrowserClient();
     const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();
     if (factorsError) throw factorsError;
-    const verified = factors.totp.find((factor: { id: string; status?: string }) => factor.status === "verified");
-    if (verified) {
+    const verified = factors.totp.filter((factor: { id: string; status?: string }) => factor.status === "verified");
+    if (verified.length) {
       setMfaMode("verify");
-      setMfaFactorId(verified.id);
+      setMfaFactors(verified.map((factor: { id: string; friendly_name?: string }, index: number) => ({ id:factor.id, label:factor.friendly_name || `Authenticator ${index + 1}` })));
+      setMfaFactorId(verified[0].id);
       setMfaQrCode("");
       setMfaSecret("");
     } else {
       const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Surgical Society Pécs staff" });
       if (error) throw error;
-      setMfaMode("enroll");
+      setMfaMode("enroll"); setMfaFactors([]);
       setMfaFactorId(data.id);
       setMfaQrCode(data.totp.qr_code);
       setMfaSecret(data.totp.secret);
     }
     setModal("mfa");
   }, []);
+
+  async function addBackupAuthenticator() {
+    setAuthBusy(true);
+    try {
+      const currentRole: PortalProfile["role"] = isAdmin ? "admin" : isCurriculumEditor ? "editor" : "demonstrator";
+      const profile: PortalProfile = { id: accountId, role: currentRole, full_name: accountName, email: accountEmail, avatarUrl: accountAvatarUrl, avatar_emoji: accountAvatarEmoji };
+      const supabase = getSupabaseBrowserClient();
+      const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Surgical Society Pécs backup" });
+      if (error) throw error;
+      setPendingProfile(profile); setMfaMode("enroll"); setMfaFactors([]); setMfaFactorId(data.id); setMfaQrCode(data.totp.qr_code); setMfaSecret(data.totp.secret); setMfaCode(""); setModal("mfa");
+    } catch { setToast("A backup authenticator could not be started."); }
+    finally { setAuthBusy(false); }
+  }
 
   async function verifyMfa(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -360,6 +383,16 @@ export default function Home() {
   const refreshPortalData = useCallback(async () => {
     setDataBusy(true);
     try {
+      if (role === "student" || isAdmin || isCurriculumEditor) {
+        const curriculumResponse = await fetch("/api/curriculum", { cache: "no-store" });
+        const curriculumPayload = await curriculumResponse.json().catch(() => ({}));
+        setCurriculumRecords(curriculumResponse.ok && curriculumPayload.modules ? curriculumPayload.modules : []);
+        if (curriculumResponse.ok && curriculumPayload.modules?.length) setSelectedCurriculumId(current => current || curriculumPayload.modules[0].id);
+      }
+      if (isCurriculumEditor) {
+        setAnnouncementRecords([]); setSubmissionRecords([]); setStudentRecords([]); setAttendance({}); setAttendanceOverview({});
+        return;
+      }
       const common = [fetch("/api/announcements", { cache: "no-store" }), fetch("/api/submissions", { cache: "no-store" })];
       const extra = role === "staff" ? [fetch("/api/staff/students", { cache: "no-store" }), fetch("/api/attendance", { cache: "no-store" })] : [];
       const responses = await Promise.all([...common, ...extra]);
@@ -404,7 +437,7 @@ export default function Home() {
         if (selected?.session_number) setSelectedSessionNumber(selected.session_number);
       }
     } finally { setDataBusy(false); }
-  }, [role]);
+  }, [role, isAdmin, isCurriculumEditor]);
 
   useEffect(() => {
     if (authenticated && !isLocalPreview) {
@@ -415,10 +448,12 @@ export default function Home() {
   const nav = useMemo(() => role === "student" ? [
     ["overview", "⌂", t.overview], ["learning", "◫", t.learning], ["submissions", "↥", t.submissions],
     ["achievements", "◇", t.achievements], ["announcements", "◌", t.announcements],
+  ] : isCurriculumEditor ? [
+    ["curriculum", "▤", "Curriculum"], ["profile", "◎", t.profile],
   ] : [
     ["overview", "⌂", t.overview], ["students", "◎", t.students], ["attendance", "▦", t.attendance], ["reviews", "✓", t.reviews],
-    ["announcements", "◌", t.announcements], ["reports", "□", t.reports], ...(isAdmin ? [["admin", "⌘", t.administration]] : []),
-  ], [role, t, isAdmin]);
+    ["announcements", "◌", t.announcements], ["reports", "□", t.reports], ...(isAdmin ? [["curriculum", "▤", "Curriculum"], ["admin", "⌘", t.administration]] : []),
+  ], [role, t, isAdmin, isCurriculumEditor]);
 
   function navigate(page: string) {
     if (role === "student") setStudentPage(page as StudentPage);
@@ -468,7 +503,7 @@ export default function Home() {
 
   async function signOut() {
     if (!isLocalPreview) await getSupabaseBrowserClient().auth.signOut();
-    setAuthenticated(false); setIsAdmin(false); setAuthPassword(""); setIsLocalPreview(false); setAccountAvatarUrl(""); setAccountAvatarEmoji("");
+    setAuthenticated(false); setIsAdmin(false); setIsCurriculumEditor(false); setAccountId(""); setAuthPassword(""); setIsLocalPreview(false); setAccountAvatarUrl(""); setAccountAvatarEmoji("");
   }
 
   function enterLocalPreview() {
@@ -585,7 +620,7 @@ export default function Home() {
   if (!authenticated) {
     return <div className="auth-shell" data-theme={theme}>
       <section className="auth-intro">
-        <div className="auth-brand"><Logo compact /><div><strong>{t.society}</strong><span>{t.academy}</span></div></div>
+        <div className="auth-brand"><Logo login /><div><strong>{t.society}</strong><span>{t.academy}</span></div></div>
         <div className="auth-message"><span className="eyebrow">{t.authEyebrow}</span><h1>{t.authTitle}</h1><p>{t.authIntro}</p></div>
         <div className="auth-proof"><article><span>○</span><div><strong>{t.privateTitle}</strong><p>{t.privateText}</p></div></article><article><span>HU</span><div><strong>English · Magyar</strong><p>One academy, available in both languages.</p></div></article></div>
         <p className="auth-university">Surgical Society Pécs · Independent skills community</p>
@@ -614,7 +649,7 @@ export default function Home() {
         </div>
       </section>
       {modal === "forgot" && <ModalShell title="Reset your password" onClose={() => setModal(null)}><form onSubmit={sendPasswordReset}><p className="modal-copy">Enter your account email. A secure reset link will be sent if the address belongs to an account.</p><label className="form-field"><span>{t.email}</span><input name="resetEmail" type="email" required placeholder="anna.nagy@example.com" /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" type="submit">Send reset link</button></div></form></ModalShell>}
-      {modal === "mfa" && <ModalShell title="Staff security verification" onClose={() => void signOut()}><form className="mfa-form" onSubmit={verifyMfa}>{mfaMode === "enroll" ? <><p className="modal-copy">Staff accounts require two-factor authentication. Scan this QR code with an authenticator app, then enter the current six-digit code.</p>{mfaQrCode && <Image className="mfa-qr" src={mfaQrCode} width={190} height={190} alt="Authenticator setup QR code" unoptimized />}<details><summary>Cannot scan the code?</summary><code>{mfaSecret}</code></details></> : <p className="modal-copy">Open your authenticator app and enter the current six-digit code to continue to the staff area.</p>}<label className="form-field"><span>Authenticator code</span><input value={mfaCode} onChange={event => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" placeholder="000000" required /></label><button className="primary-button full-button" type="submit" disabled={authBusy}>{authBusy ? "Verifying…" : "Verify and continue →"}</button></form></ModalShell>}
+      {modal === "mfa" && <ModalShell title="Secure staff sign-in" onClose={() => void signOut()}><form className="mfa-form" onSubmit={verifyMfa}>{mfaMode === "enroll" ? <><p className="modal-copy">This one-time setup protects student information. It usually takes less than a minute.</p><ol className="mfa-steps"><li><b>1</b><span>Open Google Authenticator, Microsoft Authenticator, 1Password or Apple Passwords on your phone.</span></li><li><b>2</b><span>Press <strong>＋</strong> and choose <strong>Scan QR code</strong>.</span></li><li><b>3</b><span>Scan this square, then enter the six-digit number shown on your phone.</span></li></ol>{mfaQrCode && <Image className="mfa-qr" src={mfaQrCode} width={210} height={210} alt="Authenticator setup QR code" unoptimized />}<details open><summary>Using this website on your phone or unable to scan?</summary><p>Choose “enter setup key” in your authenticator and paste this key:</p><code>{mfaSecret}</code></details></> : <><p className="modal-copy">Open your authenticator app and enter the current six-digit code for Surgical Society Pécs.</p><p className="mfa-help">The number changes every 30 seconds and works without mobile data.</p>{mfaFactors.length>1&&<label className="form-field"><span>Authenticator device</span><select value={mfaFactorId} onChange={event=>setMfaFactorId(event.target.value)}>{mfaFactors.map(factor=><option key={factor.id} value={factor.id}>{factor.label}</option>)}</select></label>}</>}<label className="form-field"><span>Six-digit authenticator code</span><input value={mfaCode} onChange={event => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" placeholder="000000" required /></label><button className="primary-button full-button" type="submit" disabled={authBusy}>{authBusy ? "Verifying…" : "Verify and continue →"}</button></form></ModalShell>}
       {modal === "privacy" && <ModalShell title="Privacy notice · draft for approval" onClose={() => setModal(null)} wide><PrivacyNotice /></ModalShell>}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}
     </div>;
@@ -623,11 +658,11 @@ export default function Home() {
   return <div className="site-shell" data-theme={theme}>
     <aside className="sidebar">
       <div className="brand"><Logo compact /><div><strong>{t.society}</strong><span>{t.academy}</span></div></div>
-      <nav aria-label="Primary navigation"><span className="nav-label">{role === "student" ? t.studentArea.toUpperCase() : t.staffArea.toUpperCase()}</span>{nav.map(([page, icon, label]) => <button data-testid={`nav-${page}`} className={activePage === page ? "active" : ""} onClick={() => navigate(page)} key={page}><span>{icon}</span>{label}{page === "reviews" && pendingSubmissionCount > 0 && <b>{pendingSubmissionCount}</b>}</button>)}</nav>
-      <div className="sidebar-bottom"><button className="profile-link" onClick={() => navigate("profile")}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /><span><strong>{accountName}</strong><small>{role === "student" ? t.beginner : isAdmin ? "Administrator" : "Demonstrator"}</small></span><i>•••</i></button><p>Surgical Society Pécs<br />Independent skills community</p></div>
+      <nav aria-label="Primary navigation"><span className="nav-label">{role === "student" ? t.studentArea.toUpperCase() : isCurriculumEditor ? "CURRICULUM EDITOR" : t.staffArea.toUpperCase()}</span>{nav.map(([page, icon, label]) => <button data-testid={`nav-${page}`} className={activePage === page ? "active" : ""} onClick={() => navigate(page)} key={page}><span>{icon}</span>{label}{page === "reviews" && pendingSubmissionCount > 0 && <b>{pendingSubmissionCount}</b>}</button>)}</nav>
+      <div className="sidebar-bottom"><button className="profile-link" onClick={() => navigate("profile")}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /><span><strong>{accountName}</strong><small>{role === "student" ? t.beginner : isAdmin ? "Administrator" : isCurriculumEditor ? "Curriculum editor" : "Demonstrator"}</small></span><i>•••</i></button><p>Surgical Society Pécs<br />Independent skills community</p></div>
     </aside>
     <main>
-      <header className="topbar"><div className="mobile-brand"><Logo compact /><strong>Surgical Society Pécs</strong></div><div className="area-label"><span>{role === "student" ? "ST" : "SF"}</span>{role === "student" ? t.studentArea : t.staffArea}</div><div className="top-actions"><button data-testid="language-toggle" className="language" onClick={() => setLanguage(language === "en" ? "hu" : "en")}>{language.toUpperCase()} <span>⌄</span></button><button data-testid="theme-toggle" className="theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? "☼" : "☾"}</button><button data-testid="notifications" className="notification" onClick={() => setModal("notifications")} aria-label={`${unreadAnnouncements.length} unread notifications`}>◌{unreadAnnouncements.length > 0 && <i />}</button><button data-testid="header-profile" className="header-profile" onClick={() => navigate("profile")} aria-label={t.profile}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /></button><button data-testid="sign-out" className="sign-out" onClick={signOut}>{t.signOut}</button></div></header>
+      <header className="topbar"><div className="mobile-brand"><Logo compact /><strong>Surgical Society Pécs</strong></div><div className="area-label"><span>{role === "student" ? "ST" : isCurriculumEditor ? "CE" : "SF"}</span>{role === "student" ? t.studentArea : isCurriculumEditor ? "Curriculum editor" : t.staffArea}</div><div className="top-actions"><button data-testid="language-toggle" className="language" onClick={() => setLanguage(language === "en" ? "hu" : "en")}>{language.toUpperCase()} <span>⌄</span></button><button data-testid="theme-toggle" className="theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? "☼" : "☾"}</button>{!isCurriculumEditor&&<button data-testid="notifications" className="notification" onClick={() => setModal("notifications")} aria-label={`${unreadAnnouncements.length} unread notifications`}>◌{unreadAnnouncements.length > 0 && <i />}</button>}<button data-testid="header-profile" className="header-profile" onClick={() => navigate("profile")} aria-label={t.profile}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /></button><button data-testid="sign-out" className="sign-out" onClick={signOut}>{t.signOut}</button></div></header>
       {role === "student" ? renderStudentPage() : renderStaffPage()}
     </main>
     {renderModal()}
@@ -649,6 +684,7 @@ export default function Home() {
   }
 
   function renderStaffPage() {
+    if (staffPage === "curriculum" || isCurriculumEditor) return CurriculumPage();
     const levelRows = ["Beginner", "Intermediate", "Advanced"].map(name => {
       const rows = studentRecords.filter(student => student[2] === name);
       const average = rows.length ? Math.round(rows.reduce((sum, student) => sum + Number.parseInt(student[3]), 0) / rows.length) : 0;
@@ -669,7 +705,8 @@ export default function Home() {
   }
 
   function LearningPage() {
-    return <PageFrame eyebrow={t.semester} title={t.learning} description="Structured weekly guides, demonstrations and practical submissions."><div className="level-tabs"><button className="active" onClick={() => setToast("Beginner modules selected.")}>Beginner</button><button onClick={() => setToast("Intermediate unlocks after the beginner course.")}>Intermediate</button><button onClick={() => setToast("Advanced unlocks after the intermediate course.")}>Advanced</button></div><div className="module-grid">{modules.map((m, index) => { const submission = submissionRecords.find(item => item.module?.week === m.week); const state = submission?.status === "reviewed" ? "Completed" : index === completedTechniqueCount ? "Current" : "Locked"; return <article className={`module-tile ${state.toLowerCase()}`} key={m.week}><div className="tile-top"><span>WEEK {String(m.week).padStart(2,"0")}</span><b>{state}</b></div><h3>{language === "hu" ? m.hu : m.name}</h3><p>Introduction, application, equipment, step-by-step guide and short video.</p><div className="tile-footer"><span>{submission?.score ? `${submission.score}/5` : state === "Locked" ? "○" : "12 min"}</span><button disabled={state === "Locked"} onClick={() => { setSelectedModule(m.week); setModal("lesson"); }}>{state === "Completed" ? "Review" : state === "Current" ? "Start" : "Locked"} →</button></div></article>; })}</div></PageFrame>;
+    const available = curriculumRecords.length ? curriculumRecords : modules.map(module => ({ id:`preview-${module.week}`, level:"beginner" as const, week:module.week, title_en:module.name, title_hu:module.hu }));
+    return <PageFrame eyebrow={t.semester} title={t.learning} description="Structured weekly guides, demonstrations and practical submissions."><div className="level-tabs"><button className="active" onClick={() => setToast("Beginner modules selected.")}>Beginner</button><button onClick={() => setToast("Intermediate unlocks after the beginner course.")}>Intermediate</button><button onClick={() => setToast("Advanced unlocks after the intermediate course.")}>Advanced</button></div><div className="module-grid">{available.map((m, index) => { const submission = submissionRecords.find(item => item.module?.week === m.week); const state = submission?.status === "reviewed" ? "Completed" : index === completedTechniqueCount ? "Current" : "Locked"; return <article className={`module-tile ${state.toLowerCase()}`} key={m.id}><div className="tile-top"><span>WEEK {String(m.week).padStart(2,"0")}</span><b>{state}</b></div><h3>{language === "hu" ? m.title_hu : m.title_en}</h3><p>Introduction, application, equipment, step-by-step guide and short video.</p><div className="tile-footer"><span>{submission?.score ? `${submission.score}/5` : state === "Locked" ? "○" : "12 min"}</span><button disabled={state === "Locked"} onClick={() => { setSelectedModule(m.week); setModal("lesson"); }}>{state === "Completed" ? "Review" : state === "Current" ? "Start" : "Locked"} →</button></div></article>; })}</div></PageFrame>;
   }
 
   function SubmissionsPage() {
@@ -732,21 +769,101 @@ export default function Home() {
     finally { setDataBusy(false); }
   }
 
+  function CurriculumPage() {
+    const selected = curriculumRecords.find(module => module.id === selectedCurriculumId);
+
+    async function saveChapter(event: React.FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const payload = {
+        id: selected?.id,
+        level: form.get("level"), week: Number(form.get("week")),
+        title_en: form.get("title_en"), title_hu: form.get("title_hu"),
+        introduction_en: form.get("introduction_en"), introduction_hu: form.get("introduction_hu"),
+        technique_en: form.get("technique_en"), technique_hu: form.get("technique_hu"),
+        application_en: form.get("application_en"), application_hu: form.get("application_hu"),
+        equipment_en: form.get("equipment_en"), equipment_hu: form.get("equipment_hu"),
+        steps_en: String(form.get("steps_en") ?? "").split("\n").map(step => step.trim()).filter(Boolean),
+        steps_hu: String(form.get("steps_hu") ?? "").split("\n").map(step => step.trim()).filter(Boolean),
+        video_url: form.get("video_url"), published: isAdmin && form.get("published") === "on",
+      };
+      setDataBusy(true);
+      try {
+        const response = await fetch("/api/curriculum", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "The chapter could not be saved.");
+        setSelectedCurriculumId(result.id); setToast(result.published ? "Chapter published to students." : "Curriculum draft saved.");
+        await refreshPortalData();
+      } catch (error) { setToast(error instanceof Error ? error.message : "The chapter could not be saved."); }
+      finally { setDataBusy(false); }
+    }
+
+    async function uploadAsset(file?: File) {
+      if (!file || !selected) return;
+      const image = ["image/jpeg","image/png","image/webp"].includes(file.type);
+      const video = ["video/mp4","video/webm"].includes(file.type);
+      if ((!image && !video) || file.size > (video ? 50 : 10) * 1024 * 1024) { setToast(video ? "Videos must be MP4 or WebM and no larger than 50 MB." : "Images must be JPG, PNG or WebP and no larger than 10 MB."); return; }
+      setDataBusy(true);
+      const extension = file.name.split(".").pop()?.toLowerCase().replace(/[^a-z0-9]/g, "") || (video ? "mp4" : "jpg");
+      const objectKey = `${accountId}/${selected.id}/${crypto.randomUUID()}.${extension}`;
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { error: uploadError } = await supabase.storage.from("curriculum").upload(objectKey, file, { contentType:file.type, upsert:false });
+        if (uploadError) throw uploadError;
+        const response = await fetch("/api/curriculum/assets", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ moduleId:selected.id, objectKey, kind:video ? "video" : "image", caption:file.name }) });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error ?? "The file could not be attached.");
+        setToast(`${video ? "Video" : "Image"} added to the chapter.`); await refreshPortalData();
+      } catch (error) { setToast(error instanceof Error ? error.message : "The file could not be uploaded."); }
+      finally { setDataBusy(false); }
+    }
+
+    async function removeAsset(asset: CurriculumAsset) {
+      if (!confirm("Remove this file from the chapter?")) return;
+      const response = await fetch(`/api/curriculum/assets?id=${asset.id}`, { method:"DELETE" });
+      const result = await response.json().catch(() => ({}));
+      setToast(response.ok ? "File removed." : result.error ?? "The file could not be removed.");
+      if (response.ok) await refreshPortalData();
+    }
+
+    return <PageFrame eyebrow={isAdmin ? "ADMINISTRATOR · PUBLICATION CONTROL" : "CURRICULUM EDITOR · DRAFT ACCESS"} title="Teaching curriculum" description={isAdmin ? "Review chapters, manage teaching media and decide what students can see." : "Write structured teaching chapters and add images or short videos. Only the administrator can publish them."} action={<button className="primary-button" onClick={() => setSelectedCurriculumId("")}>＋ New chapter</button>}>
+      <section className="editor-policy"><span>✓</span><div><strong>Focused permissions</strong><p>Curriculum editors cannot access students, attendance, submissions, invitation codes or announcements. New work remains a draft until an administrator publishes it.</p></div></section>
+      <div className="curriculum-workspace"><aside className="chapter-list"><div><strong>Chapters</strong><span>{curriculumRecords.length}</span></div>{curriculumRecords.length===0?<p>No chapters yet.</p>:curriculumRecords.map(module=><button type="button" className={selectedCurriculumId===module.id?"active":""} onClick={()=>setSelectedCurriculumId(module.id)} key={module.id}><span>W{module.week}</span><div><strong>{module.title_en}</strong><small>{module.level} · {module.published?"Published":"Draft"}</small></div></button>)}</aside>
+        <form className="chapter-editor" key={selected?.id ?? "new"} onSubmit={saveChapter}><div className="chapter-editor-head"><div><span className="eyebrow">{selected ? `WEEK ${selected.week}` : "NEW CHAPTER"}</span><h2>{selected?.title_en ?? "Untitled teaching chapter"}</h2></div>{selected&&<b className={selected.published?"published":"draft"}>{selected.published?"Published":"Draft"}</b>}</div>
+          <div className="form-grid"><label className="form-field"><span>Level</span><select name="level" defaultValue={selected?.level??"beginner"}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label><label className="form-field"><span>Week</span><input name="week" type="number" min="1" max="30" defaultValue={selected?.week??curriculumRecords.length+1} required /></label></div>
+          <div className="editor-language-grid"><fieldset><legend>English chapter</legend><label className="form-field"><span>Title</span><input name="title_en" maxLength={180} defaultValue={selected?.title_en??""} required /></label><label className="reflection-label">Introduction<textarea name="introduction_en" defaultValue={selected?.introduction_en??""} /></label><label className="reflection-label">Technique<textarea name="technique_en" defaultValue={selected?.technique_en??""} /></label><label className="reflection-label">Application<textarea name="application_en" defaultValue={selected?.application_en??""} /></label><label className="reflection-label">Equipment list<textarea name="equipment_en" defaultValue={selected?.equipment_en??""} /></label><label className="reflection-label">Steps · one per line<textarea name="steps_en" defaultValue={(selected?.steps_en??[]).join("\n")} /></label></fieldset><fieldset><legend>Magyar fejezet</legend><label className="form-field"><span>Cím</span><input name="title_hu" maxLength={180} defaultValue={selected?.title_hu??""} required /></label><label className="reflection-label">Bevezetés<textarea name="introduction_hu" defaultValue={selected?.introduction_hu??""} /></label><label className="reflection-label">Technika<textarea name="technique_hu" defaultValue={selected?.technique_hu??""} /></label><label className="reflection-label">Alkalmazás<textarea name="application_hu" defaultValue={selected?.application_hu??""} /></label><label className="reflection-label">Eszközlista<textarea name="equipment_hu" defaultValue={selected?.equipment_hu??""} /></label><label className="reflection-label">Lépések · soronként egy<textarea name="steps_hu" defaultValue={(selected?.steps_hu??[]).join("\n")} /></label></fieldset></div>
+          <label className="form-field"><span>Optional external video link</span><input name="video_url" type="url" defaultValue={selected?.video_url??""} placeholder="https://…" /></label>
+          {selected&&<section className="chapter-assets"><div><strong>Chapter media</strong><label className="secondary-button">＋ Upload image or video<input type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/webm" hidden onChange={event=>{void uploadAsset(event.target.files?.[0]);event.currentTarget.value="";}} /></label></div>{selected.assets.length===0?<p>No media uploaded yet. Images may be up to 10 MB; MP4/WebM videos up to 50 MB.</p>:<div className="asset-grid">{selected.assets.map(asset=><article key={asset.id}>{asset.kind==="image"&&asset.url?<Image src={asset.url} width={320} height={200} unoptimized alt={asset.caption??"Curriculum image"}/>:asset.url?<video src={asset.url} controls preload="metadata"/>:<span>Media unavailable</span>}<div><small>{asset.kind.toUpperCase()}</small><strong>{asset.caption??"Teaching media"}</strong><button type="button" onClick={()=>void removeAsset(asset)}>Remove</button></div></article>)}</div>}</section>}
+          <div className="chapter-save">{isAdmin?<label className="check-row"><input name="published" type="checkbox" defaultChecked={selected?.published??false} /> Publish to students after saving</label>:<p>Saved as a private draft for administrator review.</p>}<button className="primary-button" type="submit" disabled={dataBusy}>{dataBusy?"Saving…":isAdmin?"Save chapter":"Save draft"} →</button></div>
+        </form></div>
+    </PageFrame>;
+  }
+
   function AdminPage() {
     async function createStaffCode(event: React.FormEvent) {
       event.preventDefault();
-      if (newCode.length < 6 || (inviteRole === "demonstrator" && !/^\d{6,}$/.test(newCode))) { setToast(inviteRole === "demonstrator" ? "Demonstrator codes must contain at least 6 digits." : "Event codes must contain at least 6 characters."); return; }
+      if (newCode.length < 6 || (inviteRole !== "student" && !/^\d{6,}$/.test(newCode))) { setToast(inviteRole !== "student" ? "Staff and editor codes must contain at least 6 digits." : "Event codes must contain at least 6 characters."); return; }
       if (isLocalPreview) { setStaffCodes(current=>[{code:newCode,status:"Preview",expires:`${inviteRole} · ${inviteMaxUses} use(s)`},...current]); setNewCode(""); setToast("Preview code created locally."); return; }
       const response = await fetch("/api/admin/invite-codes", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({code:newCode,role:inviteRole,level:inviteRole==="student"?inviteLevel:null,maxUses:inviteRole==="student"?inviteMaxUses:1}) });
       const result = await response.json();
       if (!response.ok) { setToast(result.error ?? "The code could not be created."); return; }
-      setStaffCodes(current => [{id:result.id,code:newCode,status:"Active",expires:inviteRole==="student"?`${inviteLevel} · ${inviteMaxUses} uses · expires in 48 hours`:"Single use · expires in 48 hours"},...current]);
+      setStaffCodes(current => [{id:result.id,code:newCode,status:"Active",expires:inviteRole==="student"?`${inviteLevel} · ${inviteMaxUses} uses · expires in 48 hours`:`${inviteRole === "editor" ? "Curriculum editor" : "Demonstrator"} · single use · expires in 48 hours`},...current]);
       setNewCode("");
-      setToast(`A new ${inviteRole === "student" ? "student event" : "single-use demonstrator"} code was created. It expires in 48 hours. Copy it now; only its secure hash is stored.`);
+      setToast(`A new ${inviteRole === "student" ? "student event" : inviteRole === "editor" ? "single-use curriculum editor" : "single-use demonstrator"} code was created. It expires in 48 hours. Copy it now; only its secure hash is stored.`);
+    }
+    async function resetStaffMfa(event: React.FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      const email = String(new FormData(event.currentTarget).get("staffEmail") ?? "").trim();
+      if (!confirm(`Reset the authenticator for ${email}? This signs the account out on every device.`)) return;
+      const response = await fetch("/api/admin/mfa-reset", { method:"DELETE", headers:{"Content-Type":"application/json"}, body:JSON.stringify({email}) });
+      const result = await response.json().catch(() => ({}));
+      setToast(response.ok ? result.message : result.error ?? "Authenticator reset failed.");
+      if (response.ok) event.currentTarget.reset();
     }
     return <PageFrame eyebrow="ADMINISTRATOR ONLY" title={t.administration} description="Manage demonstrator access, review safeguards and keep responsibility with one named administrator.">
       <div className="admin-grid"><section className="admin-identity"><span className="avatar large">{initials(accountName)}</span><div><span className="eyebrow">PRIMARY ADMINISTRATOR</span><h2>{accountName}</h2><p>Can issue and revoke demonstrator codes, correct attendance and review the audit history.</p></div><b>Protected role</b></section>
-      <section className="code-panel"><div><span className="eyebrow">CONTROLLED ACCESS</span><h2>Invitation codes</h2><p>Create reusable event codes for students or single-use numeric codes for demonstrators. Only secure hashes are stored.</p></div><form onSubmit={createStaffCode}><fieldset className="target-field"><legend>Code type</legend><div><button type="button" className={inviteRole==="student"?"active":""} onClick={()=>setInviteRole("student")}>Student event</button><button type="button" className={inviteRole==="demonstrator"?"active":""} onClick={()=>setInviteRole("demonstrator")}>Demonstrator</button></div></fieldset>{inviteRole==="student"&&<div className="form-grid"><label className="form-field"><span>Course level</span><select value={inviteLevel} onChange={e=>setInviteLevel(e.target.value as typeof inviteLevel)}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label><label className="form-field"><span>Available places</span><input type="number" min="1" max="200" value={inviteMaxUses} onChange={e=>setInviteMaxUses(Number(e.target.value))}/></label></div>}<label className="form-field"><span>New code · minimum 6 {inviteRole==="demonstrator"?"digits":"characters"}</span><input data-testid="admin-code-input" inputMode={inviteRole==="demonstrator"?"numeric":"text"} pattern={inviteRole==="demonstrator"?"[0-9]{6,}":".{6,}"} minLength={6} value={newCode} onChange={event => setNewCode(inviteRole==="demonstrator"?event.target.value.replace(/\D/g,""):event.target.value)} placeholder={inviteRole==="demonstrator"?"e.g. 624913":"e.g. PECSSPRING"} required /></label><button className="primary-button" type="submit">Create code →</button></form><div className="code-list">{staffCodes.length === 0 && <p className="modal-copy">New codes appear here once, immediately after creation.</p>}{staffCodes.map(item => <article key={item.code}><code>{item.code}</code><div><strong>{item.status}</strong><small>{item.expires}</small></div><button onClick={async () => { if (item.status !== "Active" || !item.id) { setToast("This code is no longer active."); return; } const response=await fetch(`/api/admin/invite-codes?id=${item.id}`,{method:"DELETE"}); if(response.ok) setStaffCodes(current=>current.map(code=>code.id===item.id?{...code,status:"Revoked",expires:"Revoked by administrator"}:code)); else setToast("The code could not be revoked."); }}>{item.status === "Active" ? "Revoke" : "Closed"}</button></article>)}</div></section></div>
+      <section className="code-panel"><div><span className="eyebrow">CONTROLLED ACCESS</span><h2>Invitation codes</h2><p>Create student, demonstrator or curriculum-editor access. Only secure hashes are stored.</p></div><form onSubmit={createStaffCode}><fieldset className="target-field"><legend>Code type</legend><div><button type="button" className={inviteRole==="student"?"active":""} onClick={()=>setInviteRole("student")}>Student event</button><button type="button" className={inviteRole==="demonstrator"?"active":""} onClick={()=>setInviteRole("demonstrator")}>Demonstrator</button><button type="button" className={inviteRole==="editor"?"active":""} onClick={()=>setInviteRole("editor")}>Curriculum editor</button></div></fieldset>{inviteRole==="student"&&<div className="form-grid"><label className="form-field"><span>Course level</span><select value={inviteLevel} onChange={e=>setInviteLevel(e.target.value as typeof inviteLevel)}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label><label className="form-field"><span>Available places</span><input type="number" min="1" max="200" value={inviteMaxUses} onChange={e=>setInviteMaxUses(Number(e.target.value))}/></label></div>}<label className="form-field"><span>New code · minimum 6 {inviteRole!=="student"?"digits":"characters"}</span><input data-testid="admin-code-input" inputMode={inviteRole!=="student"?"numeric":"text"} pattern={inviteRole!=="student"?"[0-9]{6,}":".{6,}"} minLength={6} value={newCode} onChange={event => setNewCode(inviteRole!=="student"?event.target.value.replace(/\D/g,""):event.target.value)} placeholder={inviteRole!=="student"?"e.g. 624913":"e.g. PECSSPRING"} required /></label><button className="primary-button" type="submit">Create code →</button></form><div className="code-list">{staffCodes.length === 0 && <p className="modal-copy">New codes appear here once, immediately after creation.</p>}{staffCodes.map(item => <article key={item.code}><code>{item.code}</code><div><strong>{item.status}</strong><small>{item.expires}</small></div><button onClick={async () => { if (item.status !== "Active" || !item.id) { setToast("This code is no longer active."); return; } const response=await fetch(`/api/admin/invite-codes?id=${item.id}`,{method:"DELETE"}); if(response.ok) setStaffCodes(current=>current.map(code=>code.id===item.id?{...code,status:"Revoked",expires:"Revoked by administrator"}:code)); else setToast("The code could not be revoked."); }}>{item.status === "Active" ? "Revoke" : "Closed"}</button></article>)}</div></section></div>
+      <section className="mfa-recovery"><div><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Lost authenticator phone</h2><p>Reset a demonstrator or curriculum editor only after confirming their identity in person. The account is signed out everywhere and receives a fresh QR code at the next login.</p></div><form onSubmit={resetStaffMfa}><label className="form-field"><span>Staff account email</span><input name="staffEmail" type="email" placeholder="name@example.com" required /></label><button className="secondary-button" type="submit">Reset authenticator →</button></form></section>
       <section className="security-section"><div className="section-heading"><div><span className="eyebrow">LAUNCH SAFEGUARDS</span><h2>Security & data responsibilities</h2></div><button className="secondary-button" onClick={() => setToast("Security checklist marked for the launch review.")}>Review checklist</button></div><div className="security-grid"><article><span>01</span><h3>Identity & roles</h3><p>Managed password authentication, verified email, staff MFA and server-side checks for student, demonstrator and administrator permissions.</p></article><article><span>02</span><h3>Structured records</h3><p>The database separates accounts, codes, modules, attendance, submissions, announcements and audit events.</p></article><article><span>03</span><h3>Private photo storage</h3><p>Uploads use private object storage with short-lived links, file validation and the agreed six-month retention period.</p></article><article><span>04</span><h3>Accountability</h3><p>Code creation, attendance changes and submission reviews are timestamped with the responsible staff account.</p></article></div></section>
     </PageFrame>;
   }
@@ -769,9 +886,10 @@ export default function Home() {
         const result = await response.json().catch(() => ({}));
         completeAction(response.ok ? "Profile changes saved." : result.error ?? "Profile changes could not be saved.");
       }}>
-        <div className="profile-identity"><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} className="large" /><div><h2>{accountName}</h2><p>{role === "student" ? t.beginner : isAdmin ? "Administrator" : "Demonstrator"}</p><button className="profile-photo-button" type="button" disabled={dataBusy} onClick={() => profilePhotoInput.current?.click()}>{accountAvatarUrl ? "Change profile picture" : "Add a profile picture"}</button><small>Upload a private photo or choose an emoji. Otherwise, we show a surgeon placeholder.</small><input ref={profilePhotoInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={event => void uploadProfilePhoto(event.target.files?.[0])} /></div></div>
+        <div className="profile-identity"><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} className="large" /><div><h2>{accountName}</h2><p>{role === "student" ? t.beginner : isAdmin ? "Administrator" : isCurriculumEditor ? "Curriculum editor" : "Demonstrator"}</p><button className="profile-photo-button" type="button" disabled={dataBusy} onClick={() => profilePhotoInput.current?.click()}>{accountAvatarUrl ? "Change profile picture" : "Add a profile picture"}</button><small>Upload a private photo or choose an emoji. Otherwise, we show a surgeon placeholder.</small><input ref={profilePhotoInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={event => void uploadProfilePhoto(event.target.files?.[0])} /></div></div>
         <fieldset className="emoji-picker"><legend>Choose an emoji profile picture</legend><div>{emojiChoices.map(emoji => <button type="button" className={accountAvatarEmoji === emoji && !accountAvatarUrl ? "selected" : ""} key={emoji} onClick={() => { setAccountAvatarEmoji(emoji); setAccountAvatarUrl(""); }} aria-label={`Use ${emoji} as profile picture`}>{emoji}</button>)}</div><label><span>Or paste another emoji</span><input value={accountAvatarEmoji} maxLength={16} onChange={event => { setAccountAvatarEmoji(event.target.value); setAccountAvatarUrl(""); }} placeholder="🙂" /></label></fieldset>
         <div className="form-grid"><label className="form-field"><span>{t.fullName}</span><input value={accountName} minLength={2} maxLength={120} onChange={event => setAccountName(event.target.value)} required /></label><label className="form-field"><span>{t.email}</span><input value={accountEmail} readOnly /></label><label className="form-field"><span>Interface language</span><select value={language} onChange={event => setLanguage(event.target.value as Language)}><option value="en">English</option><option value="hu">Magyar</option></select></label><label className="form-field"><span>Email notifications</span><select defaultValue="important"><option value="important">Important updates and feedback</option><option value="all">All activity</option><option value="none">None</option></select></label></div>
+        {role === "staff"&&<section className="backup-authenticator"><div><strong>Authenticator recovery</strong><p>Add the same account to a second trusted phone or password manager. Supabase supports multiple authenticator factors instead of recovery codes.</p></div><button className="secondary-button" type="button" disabled={authBusy} onClick={()=>void addBackupAuthenticator()}>Add backup authenticator →</button></section>}
         <div className="form-actions"><button className="secondary-button" type="button" onClick={() => setToast("No profile changes were made.")}>{t.cancel}</button><button className="primary-button" type="submit">{t.save}</button></div>
       </form>
     </PageFrame>;
@@ -794,7 +912,7 @@ export default function Home() {
     if (!modal) return null;
     if (modal === "privacy") return <ModalShell title="Privacy notice · draft for approval" onClose={() => setModal(null)} wide><PrivacyNotice /></ModalShell>;
     if (modal === "notifications") return <ModalShell title="Notifications" onClose={() => setModal(null)}>{announcementRecords.length ? <div className="notification-list">{announcementRecords.slice(0,8).map(item => <article key={item.id??item.title} className={item.id&&readAnnouncementIds.includes(item.id)?"read":""}><span>●</span><div><strong>{item.title}</strong><p>{item.text}</p></div></article>)}</div> : <div className="empty-state compact"><span>○</span><h3>You are all caught up</h3><p>Demonstrator announcements will appear in this inbox.</p></div>}<button className="secondary-button full-button" disabled={unreadAnnouncements.length===0} onClick={() => {void markAnnouncementsRead();completeAction("All notifications marked as read.");}}>Mark all as read</button></ModalShell>;
-    if (modal === "lesson") { const m=modules.find(x=>x.week===selectedModule) || modules[3]; return <ModalShell title={language === "hu" ? m.hu : m.name} onClose={() => setModal(null)} wide><div className="lesson-layout"><div className="lesson-video"><span>▶</span><small>QUICK VIDEO · 03:18</small></div><div><span className="eyebrow">WEEK {String(m.week).padStart(2,"0")} · {m.level}</span><h3>Technique guide</h3><p>Use a needle holder, toothed forceps, scissors, 3-0 practice suture and a synthetic pad.</p><ol><li>Enter the tissue at a 90° angle.</li><li>Follow the natural curve of the needle.</li><li>Mirror the bite on the opposite side.</li><li>Tie a secure square knot without excess tension.</li></ol><div className="modal-actions"><button className="secondary-button" onClick={() => completeAction("Lesson marked for later.")}>Save for later</button><button className="primary-button" onClick={() => setModal("upload")}>{t.submitWork} →</button></div></div></div></ModalShell>; }
+    if (modal === "lesson") { const live=curriculumRecords.find(x=>x.week===selectedModule); const fallback=modules.find(x=>x.week===selectedModule) || modules[3]; const video=live?.assets.find(asset=>asset.kind==="video"&&asset.url); const images=live?.assets.filter(asset=>asset.kind==="image"&&asset.url)??[]; const title=live?(language==="hu"?live.title_hu:live.title_en):(language==="hu"?fallback.hu:fallback.name); const equipment=live?(language==="hu"?live.equipment_hu:live.equipment_en):"Use a needle holder, toothed forceps, scissors, 3-0 practice suture and a synthetic pad."; const technique=live?(language==="hu"?live.technique_hu:live.technique_en):"Follow each step slowly and maintain consistent tissue handling."; const steps=live?(language==="hu"?live.steps_hu:live.steps_en):["Enter the tissue at a 90° angle.","Follow the natural curve of the needle.","Mirror the bite on the opposite side.","Tie a secure square knot without excess tension."]; return <ModalShell title={title} onClose={() => setModal(null)} wide><div className="lesson-layout"><div className="lesson-media">{video?.url?<video src={video.url} controls preload="metadata"/>:images[0]?.url?<Image src={images[0].url} width={720} height={480} unoptimized alt={images[0].caption??title}/>:<div className="lesson-video"><span>▶</span><small>TEACHING MEDIA</small></div>}{live?.video_url&&<a href={live.video_url} target="_blank" rel="noreferrer">Open external teaching video ↗</a>}{images.length>1&&<div className="lesson-image-strip">{images.slice(1).map(image=><Image key={image.id} src={image.url!} width={180} height={120} unoptimized alt={image.caption??title}/>)}</div>}</div><div><span className="eyebrow">WEEK {String(live?.week??fallback.week).padStart(2,"0")} · {live?.level??fallback.level}</span><h3>{language==="hu"?"Technikai útmutató":"Technique guide"}</h3>{live&&(language==="hu"?live.introduction_hu:live.introduction_en)&&<p>{language==="hu"?live.introduction_hu:live.introduction_en}</p>}<p>{technique}</p><h4>{language==="hu"?"Eszközök":"Equipment"}</h4><p>{equipment}</p><ol>{steps.map((step,index)=><li key={`${index}-${step}`}>{step}</li>)}</ol>{live&&(language==="hu"?live.application_hu:live.application_en)&&<><h4>{language==="hu"?"Alkalmazás":"Application"}</h4><p>{language==="hu"?live.application_hu:live.application_en}</p></>}<div className="modal-actions"><button className="secondary-button" onClick={() => completeAction("Lesson marked for later.")}>Save for later</button><button className="primary-button" onClick={() => setModal("upload")}>{t.submitWork} →</button></div></div></div></ModalShell>; }
     if (modal === "upload") return <ModalShell title={t.submitWork} onClose={() => {setModal(null);setSelectedFile("");selectedUpload.current=null;}}><form onSubmit={submitPhoto}><p className="modal-copy">Upload one clear JPG, PNG or WebP photo, up to 10 MB. It remains private between you and the demonstrator team.</p><button type="button" className={`dropzone ${selectedFile ? "has-file" : ""}`} onClick={() => fileInput.current?.click()}><span>{selectedFile ? "✓" : "↥"}</span><strong>{selectedFile || "Choose photo"}</strong></button><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e => {selectedUpload.current=e.target.files?.[0]??null;setSelectedFile(e.target.files?.[0]?.name || "");}} /><label className="reflection-label">Optional reflection<textarea name="reflection" maxLength={1000} placeholder="What felt easy or difficult?" /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" type="submit" disabled={!selectedFile||dataBusy}>{dataBusy?"Uploading…":t.send}</button></div></form></ModalShell>;
     if (modal === "feedback") {const item=submissionRecords.find(entry=>entry.id===selectedSubmissionId);return <ModalShell title="Demonstrator feedback" onClose={() => setModal(null)}><div className="feedback-detail"><div className="feedback-head"><span className="avatar staff">SF</span><div><strong>Demonstrator team</strong><small>{item?.module?.title_en??"Technique"}</small></div><span className="score">{item?.score??4}<span>/5</span></span></div><div className="feedback-status"><span>✓</span><strong>{item?.outcome==="more_practice"?"A little more practice":t.allDone}</strong></div><blockquote>{item?.feedback??"Good needle angles and consistent spacing. Continue practising consistent tension."}</blockquote></div><button className="primary-button full-button" onClick={() => setModal(null)}>{t.close}</button></ModalShell>;}
     if (modal === "certificate") return <ModalShell title="Certificate preview" onClose={() => setModal(null)}><div className="certificate-preview"><Logo /><span>SURGICAL SOCIETY PÉCS</span><h3>Certificate of Completion</h3><p>This certifies that <strong>Anna Nagy</strong> has successfully completed the Beginner Surgical Skills programme.</p><small>Preview · issued after all 13 techniques are approved</small></div><button className="primary-button full-button" onClick={() => completeAction("Certificate preview downloaded.")}>{t.download}</button></ModalShell>;

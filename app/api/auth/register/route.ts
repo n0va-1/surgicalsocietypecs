@@ -51,12 +51,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: duplicate ? "An account with this email already exists." : "The account could not be created." }, { status: duplicate ? 409 : 500 });
   }
 
+  const curriculumEditor = Boolean(invite.curriculum_editor);
   await admin.from("profiles").update({
-    role: requestedRole,
+    role: curriculumEditor ? "student" : requestedRole,
+    curriculum_editor: curriculumEditor,
     rank: invite.course_level ?? null,
     privacy_accepted_at: new Date().toISOString(),
     privacy_version: "2026-07-draft",
   }).eq("id", data.user.id);
   await admin.from("invite_redemptions").insert({ invite_code_id: invite.invite_id, user_id: data.user.id, email });
-  return NextResponse.json({ message: "Account created. Check your email to confirm it before logging in." }, { status: 201 });
+  return NextResponse.json({ message: `${curriculumEditor ? "Curriculum editor" : "Account"} created. Check your email to confirm it before logging in.` }, { status: 201 });
 }

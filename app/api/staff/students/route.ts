@@ -6,7 +6,7 @@ export async function GET() {
   const staff = await requireRole(["demonstrator", "admin"]);
   if (!staff) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const admin = createSupabaseAdminClient();
-  const profileQuery = admin.from("profiles").select("id,full_name,email,rank,eligible,is_demo,avatar_path,created_at").eq("role", "student").eq("is_demo", staff.is_demo).order("full_name");
+  const profileQuery = admin.from("profiles").select("id,full_name,email,rank,eligible,is_demo,avatar_path,created_at").eq("role", "student").eq("curriculum_editor", false).eq("is_demo", staff.is_demo).order("full_name");
   const [{ data: profiles, error }, { data: submissions }, { data: attendance }] = await Promise.all([
     profileQuery,
     admin.from("submissions").select("student_id,status,score,created_at"),
