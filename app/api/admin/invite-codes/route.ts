@@ -1,0 +1,38 @@
+import { NextResponse } from "next/server";
+import { requireRole } from "@/lib/auth";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+
+export async function GET() {
+  if (!await requireRole(["admin"])) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin.from("invite_codes").select("id,role,course_level,max_uses,uses,expires_at,revoked_at,created_at").order("created_at", { ascending: false });
+  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ codes: data });
+}
+
+export async function POST(request: Request) {
+  const profile = await requireRole(["admin"]);
+  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const body = await request.json().catch(() => null) as null | { code?: string; role?: "student" | "demonstrator"; level?: string; maxUses?: number; expiresAt?: string };
+  const code = body?.code?.trim();
+  const role = body?.role === "student" ? "student" : "demonstrator";
+  if (!code || (role === "demonstrator" && !/^\d{6,}$/.test(code)) || code.length < 6) {
+    return NextResponse.json({ error: "Codes must be at least six characters; staff codes must be numeric." }, { status: 400 });
+  }
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin.rpc("create_invite_code", {
+    plain_code: code, invite_role: role, invite_level: body?.level ?? null,
+    invite_max_uses: Math.max(1, Math.min(body?.maxUses ?? 1, 200)), invite_expires_at: body?.expiresAt ?? new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+    creator_id: profile.id,
+  });
+  return error ? NextResponse.json({ error: error.message }, { status: 400 }) : NextResponse.json({ id: data }, { status: 201 });
+}
+
+export async function DELETE(request: Request) {
+  const profile = await requireRole(["admin"]);
+  if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const id = new URL(request.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "Code id required" }, { status: 400 });
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.from("invite_codes").update({ revoked_at: new Date().toISOString() }).eq("id", id);
+  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ ok: true });
+}
