@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 
 export async function GET() {
   if (!await requireRole(["admin"])) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -10,8 +11,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const profile = await requireRole(["admin"]);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await consumeRateLimit(request, `invite:${profile.id}`, 30, 3600)) return NextResponse.json({ error: "Code creation limit reached. Please try again later." }, { status: 429 });
   const body = await request.json().catch(() => null) as null | { code?: string; role?: "student" | "demonstrator"; level?: string; maxUses?: number; expiresAt?: string };
   const code = body?.code?.trim();
   const role = body?.role === "student" ? "student" : "demonstrator";
@@ -28,6 +31,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const profile = await requireRole(["admin"]);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const id = new URL(request.url).searchParams.get("id");

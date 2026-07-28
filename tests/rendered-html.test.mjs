@@ -49,7 +49,11 @@ test("ships the bilingual role-gated interactive prototype", async () => {
   assert.match(page, /function AttendancePage/);
   assert.match(page, /Maximum two missed sessions/);
   assert.match(page, /Add a profile picture/);
-  assert.match(page, /ssp-read-announcements/);
+  assert.match(page, /\/api\/announcements\/read/);
+  assert.doesNotMatch(page, /localStorage|sessionStorage/);
+  assert.match(page, /Staff security verification/);
+  assert.match(page, /Choose an emoji profile picture/);
+  assert.match(page, /total-overview/);
   assert.doesNotMatch(page, /University of Pécs|Medical School/);
   assert.match(page, /function AdminPage/);
   assert.match(page, /data-testid="admin-code-input"/);

@@ -17,10 +17,12 @@ export async function GET() {
     const work = (submissions ?? []).filter(item => item.student_id === profile.id);
     const records = (attendance ?? []).filter(item => item.student_id === profile.id);
     const reviewed = work.filter(item => item.status === "reviewed");
-    const { data: avatar } = profile.avatar_path ? await admin.storage.from("avatars").createSignedUrl(profile.avatar_path, 3600) : { data: null };
+    const avatarEmoji = profile.avatar_path?.startsWith("emoji:") ? profile.avatar_path.slice(6) : null;
+    const { data: avatar } = profile.avatar_path && !avatarEmoji ? await admin.storage.from("avatars").createSignedUrl(profile.avatar_path, 3600) : { data: null };
     return {
       ...profile,
       avatarUrl: avatar?.signedUrl ?? null,
+      avatar_emoji: avatarEmoji,
       completed: reviewed.length,
       pending: work.filter(item => item.status === "pending").length,
       averageScore: reviewed.length ? reviewed.reduce((sum, item) => sum + (item.score ?? 0), 0) / reviewed.length : null,

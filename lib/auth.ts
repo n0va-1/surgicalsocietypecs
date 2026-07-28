@@ -30,5 +30,23 @@ export async function getAuthenticatedProfile() {
 export async function requireRole(allowed: AcademyRole[]) {
   const profile = await getAuthenticatedProfile();
   if (!profile || !allowed.includes(profile.role)) return null;
+  if (profile.role !== "student") {
+    const supabase = await createSupabaseServerClient();
+    const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (data?.currentLevel !== "aal2") return null;
+  }
   return profile;
+}
+
+export async function getMfaState() {
+  const supabase = await createSupabaseServerClient();
+  const [{ data: assurance }, { data: factors }] = await Promise.all([
+    supabase.auth.mfa.getAuthenticatorAssuranceLevel(),
+    supabase.auth.mfa.listFactors(),
+  ]);
+  return {
+    currentLevel: assurance?.currentLevel ?? null,
+    nextLevel: assurance?.nextLevel ?? null,
+    enrolled: Boolean(factors?.totp.some(factor => factor.status === "verified")),
+  };
 }

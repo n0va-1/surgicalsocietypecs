@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { consumeRateLimit, isSameOriginRequest, isStrongPassword } from "@/lib/security";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+  if (!await consumeRateLimit(request, "registration", 5, 3600)) return NextResponse.json({ error: "Too many registration attempts. Please try again later." }, { status: 429 });
   const body = await request.json().catch(() => null) as null | {
     email?: string; fullName?: string; password?: string; code?: string; requestedArea?: "student" | "staff"; privacyAccepted?: boolean;
   };
@@ -14,7 +17,7 @@ export async function POST(request: Request) {
   const code = body?.code?.trim();
   const requestedRole = body?.requestedArea === "staff" ? "demonstrator" : "student";
 
-  if (!email || !emailPattern.test(email) || !fullName || fullName.length > 120 || !password || password.length < 8 || !code || body?.privacyAccepted !== true) {
+  if (!email || !emailPattern.test(email) || !fullName || fullName.length > 120 || !password || !isStrongPassword(password) || !code || body?.privacyAccepted !== true) {
     return NextResponse.json({ error: "Please check all registration fields." }, { status: 400 });
   }
   if (requestedRole === "demonstrator" && !/^\d{6,}$/.test(code)) {

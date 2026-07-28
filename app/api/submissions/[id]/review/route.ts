@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 
 export async function PUT(request: Request, context: { params: Promise<{ id: string }> }) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const staff = await requireRole(["demonstrator", "admin"]);
   if (!staff) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await consumeRateLimit(request, `review:${staff.id}`, 60, 3600)) return NextResponse.json({ error: "Review limit reached. Please try again later." }, { status: 429 });
   const { id } = await context.params;
   const body = await request.json().catch(() => null) as null | { score?: number; outcome?: "all_done" | "more_practice"; feedback?: string };
   if (!Number.isInteger(body?.score) || (body?.score ?? 0) < 1 || (body?.score ?? 0) > 5 || !["all_done", "more_practice"].includes(body?.outcome ?? "")) {

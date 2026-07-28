@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedProfile, requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 
 export async function GET() {
   const profile = await getAuthenticatedProfile();
@@ -27,8 +28,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const student = await requireRole(["student"]);
   if (!student || !student.eligible) return NextResponse.json({ error: student ? "Attendance eligibility is required." : "Forbidden" }, { status: 403 });
+  if (!await consumeRateLimit(request, `submission:${student.id}`, 12, 3600)) return NextResponse.json({ error: "Submission limit reached. Please try again later." }, { status: 429 });
   const body = await request.json().catch(() => null) as null | { moduleId?: string; objectKey?: string; reflection?: string };
   if (!body?.moduleId || !body.objectKey?.startsWith(`${student.id}/`)) return NextResponse.json({ error: "Invalid submission metadata." }, { status: 400 });
   const admin = createSupabaseAdminClient();

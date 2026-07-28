@@ -2,18 +2,26 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedProfile, requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 
 export async function GET() {
   const profile = await getAuthenticatedProfile();
   if (!profile) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.from("announcements").select("id,title_en,title_hu,body_en,body_hu,target_level,pinned,published_at,is_demo").eq("is_demo", profile.is_demo).order("pinned", { ascending: false }).order("published_at", { ascending: false }).limit(50);
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ announcements: data }, { headers: { "Cache-Control": "no-store" } });
+  const admin = createSupabaseAdminClient();
+  const [{ data, error }, { data: reads }] = await Promise.all([
+    supabase.from("announcements").select("id,title_en,title_hu,body_en,body_hu,target_level,pinned,published_at,is_demo").eq("is_demo", profile.is_demo).order("pinned", { ascending: false }).order("published_at", { ascending: false }).limit(50),
+    admin.from("audit_logs").select("entity_id").eq("actor_id", profile.id).eq("action", "announcement.read"),
+  ]);
+  const readIds = new Set((reads ?? []).map(item => item.entity_id));
+  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ announcements: (data ?? []).map(item => ({ ...item, read: readIds.has(item.id) })) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const staff = await requireRole(["demonstrator", "admin"]);
   if (!staff) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await consumeRateLimit(request, `announcement:${staff.id}`, 20, 3600)) return NextResponse.json({ error: "Announcement limit reached. Please try again later." }, { status: 429 });
   const body = await request.json().catch(() => null) as null | { title?: string; titleHu?: string; message?: string; messageHu?: string; target?: string; pinned?: boolean };
   const targets = ["everyone", "beginner", "intermediate", "advanced"];
   const target = body?.target?.toLowerCase() ?? "everyone";

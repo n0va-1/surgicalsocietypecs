@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 
 type AttendanceValue = "present" | "late" | "absent";
 const DEFAULT_SEMESTER = "2026-spring";
@@ -36,15 +37,19 @@ export async function GET(request: Request) {
   const sessionId = requestedSessionId && sessions?.some(session => session.id === requestedSessionId)
     ? requestedSessionId
     : sessions?.at(-1)?.id;
-  const { data: records } = sessionId
-    ? await admin.from("attendance_records").select("student_id,status,recorded_at,recorded_by,correction_note").eq("session_id", sessionId)
+  const sessionIds = (sessions ?? []).map(session => session.id);
+  const { data: records } = sessionIds.length
+    ? await admin.from("attendance_records").select("session_id,student_id,status,recorded_at,recorded_by,correction_note").in("session_id", sessionIds)
     : { data: [] };
-  return NextResponse.json({ sessions: sessions ?? [], activeSessionId: sessionId ?? null, records: records ?? [], totalSessions: 10, absenceLimit: 2 }, { headers: { "Cache-Control": "no-store" } });
+  const sessionNumbers = new Map((sessions ?? []).map(session => [session.id, session.session_number]));
+  return NextResponse.json({ sessions: sessions ?? [], activeSessionId: sessionId ?? null, records: (records ?? []).map(record => ({ ...record, session_number: sessionNumbers.get(record.session_id) ?? null })), totalSessions: 10, absenceLimit: 2 }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PUT(request: Request) {
+  if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
   const staff = await requireRole(["demonstrator", "admin"]);
   if (!staff) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!await consumeRateLimit(request, `attendance:${staff.id}`, 40, 600)) return NextResponse.json({ error: "Too many attendance updates. Please wait and try again." }, { status: 429 });
   const body = await request.json().catch(() => null) as null | {
     sessionId?: string; sessionNumber?: number; semesterKey?: string; title?: string; level?: "beginner" | "intermediate" | "advanced";
     startsAt?: string; records?: Array<{ studentId: string; status: AttendanceValue; correctionNote?: string }>;
