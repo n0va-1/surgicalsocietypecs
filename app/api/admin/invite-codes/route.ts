@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomInt } from "node:crypto";
 import { requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
@@ -15,13 +16,10 @@ export async function POST(request: Request) {
   const profile = await requireRole(["admin"]);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   if (!await consumeRateLimit(request, `invite:${profile.id}`, 30, 3600)) return NextResponse.json({ error: "Code creation limit reached. Please try again later." }, { status: 429 });
-  const body = await request.json().catch(() => null) as null | { code?: string; role?: "student" | "demonstrator" | "editor"; level?: string; maxUses?: number; expiresAt?: string };
-  const code = body?.code?.trim();
+  const body = await request.json().catch(() => null) as null | { role?: "student" | "demonstrator" | "editor"; level?: string; maxUses?: number; expiresAt?: string };
+  const code = randomInt(10_000_000, 100_000_000).toString();
   const role = body?.role === "student" ? "student" : "demonstrator";
   const curriculumEditor = body?.role === "editor";
-  if (!code || (role === "demonstrator" && !/^\d{6,}$/.test(code)) || code.length < 6) {
-    return NextResponse.json({ error: "Codes must be at least six characters; staff codes must be numeric." }, { status: 400 });
-  }
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.rpc("create_invite_code", {
     plain_code: code, invite_role: role, invite_level: body?.level ?? null,
@@ -33,7 +31,7 @@ export async function POST(request: Request) {
     const { error: editorError } = await admin.from("invite_codes").update({ curriculum_editor: true }).eq("id", data);
     if (editorError) return NextResponse.json({ error: "The editor permission could not be attached to this code." }, { status: 500 });
   }
-  return NextResponse.json({ id: data }, { status: 201 });
+  return NextResponse.json({ id: data, code }, { status: 201 });
 }
 
 export async function DELETE(request: Request) {

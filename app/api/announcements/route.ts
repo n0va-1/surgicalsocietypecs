@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuthenticatedProfile, requireRole } from "@/lib/auth";
+import { getAuthenticatedProfile, getMfaState } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
@@ -19,8 +19,15 @@ export async function GET() {
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
-  const staff = await requireRole(["demonstrator", "admin"]);
-  if (!staff) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  const staff = await getAuthenticatedProfile();
+  if (!staff) return NextResponse.json({ error: "Please sign in again before publishing an announcement." }, { status: 401 });
+  if (staff.role !== "demonstrator" && staff.role !== "admin") {
+    return NextResponse.json({ error: "Only demonstrators and administrators can publish announcements." }, { status: 403 });
+  }
+  const mfa = await getMfaState();
+  if (mfa.currentLevel !== "aal2") {
+    return NextResponse.json({ error: "Please verify your authenticator before publishing an announcement." }, { status: 403 });
+  }
   if (!await consumeRateLimit(request, `announcement:${staff.id}`, 20, 3600)) return NextResponse.json({ error: "Announcement limit reached. Please try again later." }, { status: 429 });
   const body = await request.json().catch(() => null) as null | { title?: string; titleHu?: string; message?: string; messageHu?: string; target?: string; pinned?: boolean };
   const targets = ["everyone", "beginner", "intermediate", "advanced"];
