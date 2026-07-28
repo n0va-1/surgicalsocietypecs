@@ -368,6 +368,18 @@ export default function Home() {
     } finally { setAuthBusy(false); }
   }
 
+  async function recoverStaffMfa() {
+    const response = await fetch("/api/me", { cache:"no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.profile) return false;
+    if (result.profile.role !== "student" && result.mfa?.currentLevel !== "aal2") {
+      await beginMfa(result.profile);
+      setToast("Verify your authenticator, then repeat the protected action.");
+      return true;
+    }
+    return false;
+  }
+
   useEffect(() => {
     let active = true;
     fetch("/api/me", { cache: "no-store" }).then(async response => {
@@ -616,7 +628,7 @@ export default function Home() {
     if(isLocalPreview){completeAction(`Preview: announcement published to ${announcementTarget}.`);return;}
     const response=await fetch("/api/announcements",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:form.get("title"),message:form.get("message"),target:announcementTarget,pinned:form.get("pinned")==="on"})});
     const result=await response.json();
-    if(!response.ok){setToast(result.error??"Announcement could not be published.");return;}
+    if(!response.ok){if(response.status===403&&await recoverStaffMfa())return;setToast(result.error??"Announcement could not be published.");return;}
     completeAction(`Announcement published to ${announcementTarget}.`); await refreshPortalData();
   }
 
@@ -848,7 +860,7 @@ export default function Home() {
       if (isLocalPreview) { const previewCode=String(crypto.getRandomValues(new Uint32Array(1))[0]).padStart(10,"0").slice(0,8); setStaffCodes(current=>[{code:previewCode,status:"Preview",expires:`${inviteRole} · ${inviteMaxUses} use(s)`},...current]); setToast("A secure preview code was generated."); return; }
       const response = await fetch("/api/admin/invite-codes", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({role:inviteRole,level:inviteRole==="student"?inviteLevel:null,maxUses:inviteRole==="student"?inviteMaxUses:1}) });
       const result = await response.json();
-      if (!response.ok) { setToast(result.error ?? "The code could not be created."); return; }
+      if (!response.ok) { if (response.status===403&&await recoverStaffMfa()) return; setToast(result.error ?? "The code could not be created."); return; }
       setStaffCodes(current => [{id:result.id,code:result.code,status:"Active",expires:inviteRole==="student"?`${inviteLevel} · ${inviteMaxUses} uses · expires in 48 hours`:`${inviteRole === "editor" ? "Curriculum editor" : "Demonstrator"} · single use · expires in 48 hours`},...current]);
       setToast(`A new ${inviteRole === "student" ? "student event" : inviteRole === "editor" ? "single-use curriculum editor" : "single-use demonstrator"} code was created. It expires in 48 hours. Copy it now; only its secure hash is stored.`);
     }
