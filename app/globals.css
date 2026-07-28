@@ -433,9 +433,12 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 .admin-identity .avatar { margin-bottom:20px; }
 .admin-identity > b { margin-top:auto; padding:6px 9px; border-radius:15px; background:#e8f3ed; color:var(--green); font-size:7px; text-transform:uppercase; letter-spacing:.6px; }
 .code-panel { padding:25px; }
-.code-panel form { display:grid; grid-template-columns:1fr auto; align-items:end; gap:10px; margin:19px 0; }
+.code-panel form { display:grid; grid-template-columns:minmax(0,1fr); align-items:stretch; gap:10px; margin:19px 0; }
 .code-panel form .form-field { margin:0; }
+.code-panel form > .target-field { margin:0 0 5px; }
+.code-panel form > .primary-button { width:max-content; min-width:190px; }
 .code-list { border-top:1px solid var(--line); }
+.code-list > .modal-copy { margin:12px 0 0; }
 .code-list article { min-height:55px; display:grid; grid-template-columns:90px 1fr auto; align-items:center; gap:12px; border-bottom:1px solid var(--line); }
 .code-list article:last-child { border-bottom:0; }
 .code-list code { color:var(--burgundy); font-size:12px; letter-spacing:1.5px; }
@@ -621,6 +624,7 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
   .sheet-actions { align-items:stretch; flex-direction:column; }
   .sheet-actions .primary-button { width:100%; }
   .code-panel form { grid-template-columns:1fr; }
+  .code-panel form > .primary-button { width:100%; }
   .security-grid { grid-template-columns:1fr; }
   .lesson-video { min-height:190px; }
   .upload-modal { max-height:calc(100vh - 30px); overflow:auto; padding:21px; }
