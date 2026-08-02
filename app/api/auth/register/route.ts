@@ -39,19 +39,26 @@ export async function POST(request: Request) {
     password,
     options: { data: { full_name: fullName } },
   });
-  if (error || !data.user) {
+  if (error || !data.user || data.user.identities?.length === 0) {
     await admin.rpc("restore_invite_code", { restored_invite_id: invite.invite_id });
     return NextResponse.json({ error: "The account could not be created. Check the details or sign in if you already have an account." }, { status: 400 });
   }
 
   const curriculumEditor = Boolean(invite.curriculum_editor);
-  await admin.from("profiles").update({
+  const { error: profileError } = await admin.from("profiles").update({
     role: curriculumEditor ? "student" : requestedRole,
     curriculum_editor: curriculumEditor,
     rank: requestedRole === "student" ? invite.course_level ?? null : null,
     privacy_accepted_at: new Date().toISOString(),
     privacy_version: "2026-07-draft",
   }).eq("id", data.user.id);
-  await admin.from("invite_redemptions").insert({ invite_code_id: invite.invite_id, user_id: data.user.id, email });
+  const { error: redemptionError } = profileError
+    ? { error: profileError }
+    : await admin.from("invite_redemptions").insert({ invite_code_id: invite.invite_id, user_id: data.user.id, email });
+  if (profileError || redemptionError) {
+    await admin.auth.admin.deleteUser(data.user.id);
+    await admin.rpc("restore_invite_code", { restored_invite_id: invite.invite_id });
+    return NextResponse.json({ error: "The account could not be completed. No invitation place was used; please try again." }, { status: 500 });
+  }
   return NextResponse.json({ message: `${curriculumEditor ? "Curriculum editor" : "Account"} created. Check your email to confirm it before logging in.` }, { status: 201 });
 }

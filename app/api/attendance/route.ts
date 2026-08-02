@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
 
 type AttendanceValue = "present" | "late" | "absent";
-const DEFAULT_SEMESTER = "2026-spring";
+const DEFAULT_SEMESTER = process.env.ACADEMY_SEMESTER_KEY?.trim() || "2026-spring";
 
 async function sendAbsenceLimitEmail(email: string, fullName: string, absenceCount: number) {
   const apiKey = process.env.RESEND_API_KEY;

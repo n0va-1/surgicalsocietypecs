@@ -39,7 +39,7 @@ function cleanExternalUrl(value: unknown) {
 }
 
 export async function GET() {
-  const profile = await requireRole(["student", "demonstrator", "admin", "editor"]);
+  const profile = await requireRole(["student", "admin", "editor"]);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const admin = createSupabaseAdminClient();
   let query = admin.from("modules").select("*").order("level").order("week");

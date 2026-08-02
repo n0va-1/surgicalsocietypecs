@@ -14,10 +14,12 @@ type StudentRow = [name: string, initials: string, level: string, progress: stri
 type AnnouncementRow = { id?: string; date: string; title: string; hu: string; text: string; target: string; pinned: boolean; publishedAt?: string };
 type SubmissionRow = { id: string; student_id: string; module_id: string; object_key: string; reflection: string | null; status: string; score: number | null; outcome: string | null; feedback: string | null; created_at: string; module: { id: string; title_en: string; title_hu: string; week: number; level: string } | null; student: { id: string; full_name: string; rank: string } | null };
 type AttendanceSession = { id: string; title: string; session_number: number | null; semester_key: string; starts_at: string };
-type PortalProfile = { id: string; role: "student" | "demonstrator" | "admin" | "editor"; full_name: string; email: string; avatarUrl?: string | null; avatar_emoji?: string | null };
-type AttendanceValue = "Present" | "Late" | "Absent";
+type PortalProfile = { id: string; role: "student" | "demonstrator" | "admin" | "editor"; full_name: string; email: string; rank?: "beginner" | "intermediate" | "advanced" | null; avatarUrl?: string | null; avatar_emoji?: string | null };
+type AttendanceValue = "Present" | "Late" | "Absent" | "Not recorded";
 type CurriculumAsset = { id: string; module_id: string; kind: "image" | "video"; object_key: string; caption: string | null; url: string | null };
 type CurriculumModule = { id: string; level: "beginner" | "intermediate" | "advanced"; week: number; title_en: string; title_hu: string; introduction_en: string | null; introduction_hu: string | null; technique_en: string | null; technique_hu: string | null; application_en: string | null; application_hu: string | null; equipment_en: string | null; equipment_hu: string | null; steps_en: string[]; steps_hu: string[]; video_url: string | null; published: boolean; assets: CurriculumAsset[] };
+type AuditLog = { id: string; action: string; entity_type: string; created_at: string; actor: { full_name: string; email: string } | null };
+type SystemStatus = { database: boolean; email: boolean; sender: boolean; retentionSchedule: boolean; staffMfa: boolean };
 
 const ui = {
   en: {
@@ -65,7 +67,7 @@ const ui = {
     studentArea: "Student academy",
     staffArea: "Staff desk",
     signOut: "Sign out",
-    semester: "Spring semester · Week 4",
+    semester: "Current semester",
     greeting: "Good afternoon, Anna",
     studentSubtitle: "Here is where your surgical skills journey stands this week.",
     staffTitle: "Demonstrator overview",
@@ -78,7 +80,7 @@ const ui = {
     badges: "Badges earned",
     currentModule: "Your current module",
     continueLearning: "Continue learning",
-    due: "Photo due Friday, 18:00",
+    due: "Submit when you are ready",
     module: "Simple interrupted suture",
     moduleDescription: "Build a secure, evenly spaced wound closure with consistent tension.",
     openLesson: "Open week 4 lesson",
@@ -149,7 +151,7 @@ const ui = {
     studentArea: "Hallgatói akadémia",
     staffArea: "Oktatói felület",
     signOut: "Kijelentkezés",
-    semester: "Tavaszi félév · 4. hét",
+    semester: "Aktuális félév",
     greeting: "Jó napot, Anna",
     studentSubtitle: "Itt láthatod, hogyan haladsz ezen a héten a sebészeti készségeiddel.",
     staffTitle: "Oktatói áttekintés",
@@ -162,7 +164,7 @@ const ui = {
     badges: "Megszerzett jelvények",
     currentModule: "Aktuális modulod",
     continueLearning: "Tanulás folytatása",
-    due: "Fotó határideje: péntek 18:00",
+    due: "Küldd be, amikor elkészültél",
     module: "Egyszerű csomós varrat",
     moduleDescription: "Készíts biztonságos, egyenletes sebzárást következetes feszességgel.",
     openLesson: "4. heti lecke megnyitása",
@@ -236,6 +238,7 @@ export default function Home() {
   const [accountName, setAccountName] = useState("Anna Nagy");
   const [registrationName, setRegistrationName] = useState("");
   const [accountEmail, setAccountEmail] = useState("");
+  const [accountRank, setAccountRank] = useState<"beginner" | "intermediate" | "advanced">("beginner");
   const [accountId, setAccountId] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authCode, setAuthCode] = useState("");
@@ -269,6 +272,9 @@ export default function Home() {
   const [score, setScore] = useState(4);
   const [reviewResult, setReviewResult] = useState("All done");
   const [attendance, setAttendance] = useState<Record<string, AttendanceValue>>({});
+  const [studentSearch, setStudentSearch] = useState("");
+  const [studentLevelFilter, setStudentLevelFilter] = useState<"all" | "beginner" | "intermediate" | "advanced">("all");
+  const [reviewFilter, setReviewFilter] = useState<"pending" | "completed">("pending");
   const [pendingProfile, setPendingProfile] = useState<PortalProfile | null>(null);
   const [mfaMode, setMfaMode] = useState<"enroll" | "verify">("verify");
   const [mfaFactorId, setMfaFactorId] = useState("");
@@ -284,14 +290,18 @@ export default function Home() {
   const [staffCodes, setStaffCodes] = useState<Array<{ id?: string; code: string; status: string; expires: string }>>([]);
   const [curriculumRecords, setCurriculumRecords] = useState<CurriculumModule[]>([]);
   const [selectedCurriculumId, setSelectedCurriculumId] = useState("");
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const profilePhotoInput = useRef<HTMLInputElement>(null);
   const selectedUpload = useRef<File | null>(null);
+  const savedProfile = useRef({ name: "Anna Nagy", language: "en" as Language, avatarUrl: "", avatarEmoji: "" });
   const t = ui[language];
   const activePage = role === "student" ? studentPage : staffPage;
   const reviewedSubmissions = submissionRecords.filter(item => item.status === "reviewed");
   const completedTechniqueCount = new Set(reviewedSubmissions.map(item => item.module_id)).size;
-  const courseProgress = Math.min(100, Math.round(completedTechniqueCount / 13 * 100));
+  const requiredTechniqueCount = Math.max(curriculumRecords.length, modules.length);
+  const courseProgress = Math.min(100, Math.round(completedTechniqueCount / requiredTechniqueCount * 100));
   const pendingSubmissionCount = submissionRecords.filter(item => item.status === "pending" || item.status === "resubmit").length;
   const earnedBadgeCount = Math.min(3, Math.floor(completedTechniqueCount / 3));
   const unreadAnnouncements = announcementRecords.filter(item => item.id && !readAnnouncementIds.includes(item.id));
@@ -303,16 +313,18 @@ export default function Home() {
     setIsCurriculumEditor(profile.role === "editor");
     setAccountName(profile.full_name);
     setAccountEmail(profile.email);
+    setAccountRank(profile.rank ?? "beginner");
     setAccountId(profile.id);
     setAccountAvatarUrl(profile.avatarUrl ?? "");
     setAccountAvatarEmoji(profile.avatar_emoji ?? "");
+    savedProfile.current = { name: profile.full_name, language, avatarUrl: profile.avatarUrl ?? "", avatarEmoji: profile.avatar_emoji ?? "" };
     setPendingProfile(null);
     setMfaCode("");
     setModal(null);
     setAuthenticated(true);
     setStudentPage("overview");
     setStaffPage(profile.role === "editor" ? "curriculum" : "overview");
-  }, []);
+  }, [language]);
 
   const beginMfa = useCallback(async (profile: PortalProfile) => {
     setPendingProfile(profile);
@@ -426,7 +438,7 @@ export default function Home() {
       if (role === "staff" && responses[2]?.ok && payloads[2].students) {
         const liveStudents = payloads[2].students.map((item: Record<string, unknown>) => {
           const name = String(item.full_name); const completed = Number(item.completed ?? 0);
-          return [name, initials(name), String(item.rank ?? "beginner").replace(/^./, letter => letter.toUpperCase()), `${Math.min(100, Math.round(completed / 13 * 100))}%`, completed ? "Progress recorded" : "Not started", String(item.id), Number(item.absences ?? 0), Boolean(item.eligible), String(item.avatarUrl ?? ""), String(item.avatar_emoji ?? "")] as StudentRow;
+          return [name, initials(name), String(item.rank ?? "beginner").replace(/^./, letter => letter.toUpperCase()), `${Math.min(100, Math.round(completed / Math.max(curriculumRecords.length, modules.length) * 100))}%`, completed ? "Progress recorded" : "Not started", String(item.id), Number(item.absences ?? 0), Boolean(item.eligible), String(item.avatarUrl ?? ""), String(item.avatar_emoji ?? "")] as StudentRow;
         });
         setStudentRecords(liveStudents);
         if (responses[3]?.ok) {
@@ -434,7 +446,7 @@ export default function Home() {
           liveStudents.forEach((row: StudentRow) => { if (row[5]) byId.set(row[5], row[0]); });
           const next: Record<string, AttendanceValue> = {};
           const overview: Record<string, Partial<Record<number, AttendanceValue>>> = {};
-          liveStudents.forEach((row: StudentRow) => { next[row[0]] = "Present"; });
+          liveStudents.forEach((row: StudentRow) => { next[row[0]] = "Not recorded"; });
           for (const record of payloads[3].records ?? []) {
             const name=byId.get(record.student_id);
             const value=String(record.status).replace(/^./, letter=>letter.toUpperCase()) as AttendanceValue;
@@ -442,7 +454,7 @@ export default function Home() {
             if (name && Number.isInteger(sessionNumber)) overview[String(record.student_id)] = { ...(overview[String(record.student_id)] ?? {}), [sessionNumber]: value };
           }
           const active = (payloads[3].sessions ?? []).find((session: AttendanceSession) => session.id === payloads[3].activeSessionId)?.session_number ?? 1;
-          liveStudents.forEach((row: StudentRow) => { if (row[5]) next[row[0]] = overview[row[5]]?.[active] ?? "Present"; });
+          liveStudents.forEach((row: StudentRow) => { if (row[5]) next[row[0]] = overview[row[5]]?.[active] ?? "Not recorded"; });
           setAttendanceOverview(overview);
           setAttendance(next);
         }
@@ -453,14 +465,46 @@ export default function Home() {
         const selected = (payloads[3].sessions ?? []).find((session: AttendanceSession) => session.id === payloads[3].activeSessionId);
         if (selected?.session_number) setSelectedSessionNumber(selected.session_number);
       }
+      if (isAdmin) {
+        const [codesResponse, auditResponse, statusResponse] = await Promise.all([
+          fetch("/api/admin/invite-codes", { cache: "no-store" }),
+          fetch("/api/admin/audit-logs", { cache: "no-store" }),
+          fetch("/api/admin/system-status", { cache: "no-store" }),
+        ]);
+        const [codesPayload, auditPayload, statusPayload] = await Promise.all([
+          codesResponse.json().catch(() => ({})), auditResponse.json().catch(() => ({})), statusResponse.json().catch(() => ({})),
+        ]);
+        if (codesResponse.ok && Array.isArray(codesPayload.codes)) {
+          setStaffCodes(codesPayload.codes.map((item: Record<string, unknown>) => {
+            const expired = new Date(String(item.expires_at)).getTime() <= Date.now();
+            const closed = Boolean(item.revoked_at) || Number(item.uses ?? 0) >= Number(item.max_uses ?? 1) || expired;
+            const staffLabel = String(item.allowed_email ?? "");
+            return {
+              id: String(item.id),
+              code: staffLabel || "Student event code · hidden after creation",
+              status: closed ? "Closed" : "Active",
+              expires: `${Boolean(item.curriculum_editor) ? "Curriculum editor" : item.role === "demonstrator" ? "Demonstrator" : String(item.course_level ?? "Student")} · ${Number(item.uses ?? 0)}/${Number(item.max_uses ?? 1)} used · ${expired ? "expired" : `expires ${new Date(String(item.expires_at)).toLocaleString()}`}`,
+            };
+          }));
+        }
+        if (auditResponse.ok && Array.isArray(auditPayload.logs)) setAuditLogs(auditPayload.logs);
+        if (statusResponse.ok) setSystemStatus(statusPayload as SystemStatus);
+      }
     } finally { setDataBusy(false); }
-  }, [role, isAdmin, isCurriculumEditor]);
+  }, [role, isAdmin, isCurriculumEditor, curriculumRecords.length]);
 
   useEffect(() => {
     if (authenticated && !isLocalPreview) {
       queueMicrotask(() => void refreshPortalData());
     }
   }, [authenticated, isLocalPreview, refreshPortalData]);
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("passwordUpdated") === "1") {
+      queueMicrotask(() => setToast("Your password was changed. Sign in with the new password."));
+      history.replaceState({}, "", "/");
+    }
+  }, []);
 
   const nav = useMemo(() => role === "student" ? [
     ["overview", "⌂", t.overview], ["learning", "◫", t.learning], ["submissions", "↥", t.submissions],
@@ -529,14 +573,17 @@ export default function Home() {
     setIsAdmin(role === "staff"); setIsLocalPreview(true); setAuthenticated(true); setAccountAvatarUrl(""); setAccountAvatarEmoji("");
     setStudentRecords(role === "staff" ? students : []);
     setAnnouncementRecords(announcementItems);
-    setAttendance(role === "staff" ? { "Bence Tóth": "Present", "Lilla Horváth": "Present", "Dávid Kiss": "Absent", "Eszter Varga": "Late", "Máté Szabó": "Present" } : {});
+    setSystemStatus(role === "staff" ? { database: true, email: false, sender: false, retentionSchedule: true, staffMfa: true } : null);
+    setAuditLogs([]);
+    setAttendance(role === "staff" ? { "Bence Tóth": "Not recorded", "Lilla Horváth": "Not recorded", "Dávid Kiss": "Not recorded", "Eszter Varga": "Not recorded", "Máté Szabó": "Not recorded" } : {});
+    savedProfile.current = { name: role === "staff" ? "Local Administrator Preview" : "Anna Nagy", language, avatarUrl: "", avatarEmoji: "" };
     setStudentPage("overview"); setStaffPage("overview");
   }
 
   async function sendPasswordReset(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const email = String(new FormData(event.currentTarget).get("resetEmail") ?? "");
-    const { error } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/` });
+    const { error } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/auth/callback?next=/reset-password` });
     completeAction(error ? "The reset email could not be sent." : "If that account exists, a secure reset link has been sent.");
   }
 
@@ -643,9 +690,9 @@ export default function Home() {
         <p className="auth-university">Surgical Society Pécs · Independent skills community</p>
       </section>
       <section className="auth-panel">
-        <div className="auth-tools"><button data-testid="auth-language" onClick={() => setLanguage(language === "en" ? "hu" : "en")}>{language.toUpperCase()}</button><button data-testid="auth-theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? "☼" : "☾"}</button></div>
+        <div className="auth-tools"><button data-testid="auth-language" aria-label={language === "en" ? "Switch interface to Hungarian" : "Switch interface to English"} onClick={() => setLanguage(language === "en" ? "hu" : "en")}>{language.toUpperCase()}</button><button data-testid="auth-theme" aria-label={theme === "light" ? "Use dark theme" : "Use light theme"} onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? "☼" : "☾"}</button></div>
         <div className="auth-card">
-          <div className="auth-tabs" role="tablist"><button data-testid="login-tab" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>{t.login}</button><button data-testid="register-tab" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>{t.register}</button></div>
+          <div className="auth-tabs" role="tablist" aria-label="Authentication"><button type="button" role="tab" aria-selected={authMode === "login"} data-testid="login-tab" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>{t.login}</button><button type="button" role="tab" aria-selected={authMode === "register"} data-testid="register-tab" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>{t.register}</button></div>
           <div className="auth-heading"><span className="eyebrow">{authMode === "login" ? t.login : t.register}</span><h2>{authMode === "login" ? t.welcome : t.create}</h2><p>{authMode === "login" ? t.loginIntro : t.registerIntro}</p></div>
           <form onSubmit={enterPortal}>
             <fieldset className="role-fieldset"><legend>{t.chooseArea}</legend><div className="role-options">
@@ -680,7 +727,7 @@ export default function Home() {
       <div className="sidebar-bottom"><button className="profile-link" onClick={() => navigate("profile")}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /><span><strong>{accountName}</strong><small>{role === "student" ? t.beginner : isAdmin ? "Administrator" : isCurriculumEditor ? "Curriculum editor" : "Demonstrator"}</small></span><i>•••</i></button><p>Surgical Society Pécs<br />Independent skills community</p></div>
     </aside>
     <main>
-      <header className="topbar"><div className="mobile-brand"><Logo compact /><strong>Surgical Society Pécs</strong></div><div className="area-label"><span>{role === "student" ? "ST" : isCurriculumEditor ? "CE" : "SF"}</span>{role === "student" ? t.studentArea : isCurriculumEditor ? "Curriculum editor" : t.staffArea}</div><div className="top-actions"><button data-testid="language-toggle" className="language" onClick={() => setLanguage(language === "en" ? "hu" : "en")}>{language.toUpperCase()} <span>⌄</span></button><button data-testid="theme-toggle" className="theme" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? "☼" : "☾"}</button>{!isCurriculumEditor&&<button data-testid="notifications" className="notification" onClick={() => setModal("notifications")} aria-label={`${unreadAnnouncements.length} unread notifications`}>◌{unreadAnnouncements.length > 0 && <i />}</button>}<button data-testid="header-profile" className="header-profile" onClick={() => navigate("profile")} aria-label={t.profile}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /></button><button data-testid="sign-out" className="sign-out" onClick={signOut}>{t.signOut}</button></div></header>
+      <header className="topbar"><div className="mobile-brand"><Logo compact /><strong>Surgical Society Pécs</strong></div><div className="area-label"><span>{role === "student" ? "ST" : isCurriculumEditor ? "CE" : "SF"}</span>{role === "student" ? t.studentArea : isCurriculumEditor ? "Curriculum editor" : t.staffArea}</div><div className="top-actions"><button data-testid="language-toggle" className="language" aria-label={language === "en" ? "Switch interface to Hungarian" : "Switch interface to English"} onClick={() => setLanguage(language === "en" ? "hu" : "en")}>{language.toUpperCase()} <span aria-hidden="true">⌄</span></button><button data-testid="theme-toggle" className="theme" aria-label={theme === "light" ? "Use dark theme" : "Use light theme"} onClick={() => setTheme(theme === "light" ? "dark" : "light")}>{theme === "light" ? "☼" : "☾"}</button>{!isCurriculumEditor&&<button data-testid="notifications" className="notification" onClick={() => setModal("notifications")} aria-label={`${unreadAnnouncements.length} unread notifications`}>◌{unreadAnnouncements.length > 0 && <i />}</button>}<button data-testid="header-profile" className="header-profile" onClick={() => navigate("profile")} aria-label={t.profile}><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} /></button><button data-testid="sign-out" className="sign-out" onClick={signOut}>{t.signOut}</button></div></header>
       {role === "student" ? renderStudentPage() : renderStaffPage()}
     </main>
     {renderModal()}
@@ -694,7 +741,7 @@ export default function Home() {
     if (studentPage === "announcements") return AnnouncementsPage({ staff: false });
     if (studentPage === "profile") return ProfilePage();
     return <div className="page-content"><section className="page-heading"><div><span className="eyebrow">{t.semester}</span><h1>{language === "hu" ? `Jó napot, ${accountName}` : `Good afternoon, ${accountName}`}</h1><p>{t.studentSubtitle}</p></div><div className="rank-chip"><i />{t.beginner}</div></section>
-      <section className="stats-grid"><article className="progress-card"><ProgressRing value={courseProgress} label={t.complete} /><div><span>{t.progress}</span><strong>{completedTechniqueCount} <small>/ 13</small></strong><p>{t.completedTechniques}</p></div></article><button className="stat-card" onClick={() => setStudentPage("submissions")}><span className="stat-icon amber">↥</span><div><strong>{pendingSubmissionCount}</strong><p>{t.awaiting}</p></div><i>→</i></button><button className="stat-card" onClick={() => setStudentPage("achievements")}><span className="stat-icon green">◇</span><div><strong>{earnedBadgeCount}</strong><p>{t.badges}</p></div><i>→</i></button></section>
+      <section className="stats-grid"><article className="progress-card"><ProgressRing value={courseProgress} label={t.complete} /><div><span>{t.progress}</span><strong>{completedTechniqueCount} <small>/ {requiredTechniqueCount}</small></strong><p>{t.completedTechniques}</p></div></article><button className="stat-card" onClick={() => setStudentPage("submissions")}><span className="stat-icon amber">↥</span><div><strong>{pendingSubmissionCount}</strong><p>{t.awaiting}</p></div><i>→</i></button><button className="stat-card" onClick={() => setStudentPage("achievements")}><span className="stat-icon green">◇</span><div><strong>{earnedBadgeCount}</strong><p>{t.badges}</p></div><i>→</i></button></section>
       <section className="section-heading"><div><span className="eyebrow">{t.currentModule}</span><h2>{t.continueLearning}</h2></div><span className="due">{t.due}</span></section>
       <article className="module-card"><div className="module-number"><span>{String(Math.min(completedTechniqueCount + 1, modules.length)).padStart(2,"0")}</span><small>WEEK</small></div><div className="module-copy"><div className="module-meta"><span>{t.beginner.toUpperCase()}</span><i />12 MIN LESSON</div><h3>{modules[Math.min(completedTechniqueCount, modules.length - 1)].name}</h3><p>{completedTechniqueCount === 0 ? "Start with safe instrument handling and build each skill one step at a time." : t.moduleDescription}</p><div className="step-line"><span>1</span><i /><span>2</span><i /><span>3</span><i /><span>4</span></div><small>Introduction · Technique · Step by step · Submission</small></div><div className="module-actions"><button data-testid="open-lesson" className="secondary-button" onClick={() => { setSelectedModule(Math.min(completedTechniqueCount + 1, modules.length)); setModal("lesson"); }}>Open lesson <span>→</span></button><button data-testid="submit-work" className="primary-button" onClick={() => setModal("upload")}>{t.submitWork} <span>↥</span></button></div></article>
       <div className="lower-grid"><section><div className="section-heading compact"><h2>{t.latest}</h2><button onClick={() => setStudentPage("announcements")}>{t.viewAll} →</button></div><AnnouncementList limit={2} /></section><section><div className="section-heading compact"><h2>{t.recentFeedback}</h2></div>{reviewedSubmissions.length ? <article className="feedback-card"><div className="feedback-head"><Avatar name="Demonstrator team" className="staff" /><div><strong>Demonstrator team</strong><small>{reviewedSubmissions[0].module?.title_en ?? "Technique"}</small></div><span className="score">{reviewedSubmissions[0].score ?? "—"}<span>/5</span></span></div><div className="feedback-status"><span>✓</span><strong>{reviewedSubmissions[0].outcome === "more_practice" ? t.morePractice : t.allDone}</strong></div><p>{reviewedSubmissions[0].feedback || "Your review is complete."}</p><button className="text-button" onClick={() => { setSelectedSubmissionId(reviewedSubmissions[0].id); setModal("feedback"); }}>Read full feedback →</button></article> : <div className="empty-state"><span>○</span><h3>No feedback yet</h3><p>Your demonstrator’s comments will appear here after your first submission is reviewed.</p></div>}</section></div>
@@ -717,14 +764,14 @@ export default function Home() {
     if (staffPage === "profile") return ProfilePage();
     return <div className="page-content"><section className="page-heading staff-heading"><div><span className="eyebrow">{t.semester}</span><h1>{t.staffTitle}</h1><p>{t.staffSubtitle}</p></div><button className="primary-button" onClick={() => setModal("announcement")}>＋ {t.newAnnouncement}</button></section>
       <section className="staff-stats"><button onClick={() => setStaffPage("reviews")}><ProgressRing value={Math.min(100,pendingSubmissionCount*8)} size="small" /><div><strong>{pendingSubmissionCount}</strong><p>{t.waitingReview}</p></div><span>live queue</span></button><button onClick={() => setStaffPage("students")}><span className="stat-icon burgundy">◎</span><div><strong>{studentRecords.length}</strong><p>{t.activeStudents}</p></div><span>3 levels</span></button><button onClick={() => setStaffPage("reviews")}><span className="stat-icon amber">↻</span><div><strong>{submissionRecords.filter(item=>item.status==="resubmit").length}</strong><p>{t.morePractice}</p></div><span>current</span></button></section>
-      <section className="review-panel"><div className="section-heading compact"><div><span className="eyebrow">TODAY</span><h2>{t.reviews}</h2></div><button onClick={() => setStaffPage("reviews")}>{t.reviewAll} →</button></div><ReviewTable limit={4} /></section>
+      <section className="review-panel"><div className="section-heading compact"><div><span className="eyebrow">TODAY</span><h2>{t.reviews}</h2></div><button onClick={() => setStaffPage("reviews")}>{t.reviewAll} →</button></div><ReviewTable limit={4} mode="pending" /></section>
       <div className="staff-lower"><section className="level-progress"><div className="section-heading compact"><h2>Progress by level</h2><button onClick={() => setStaffPage("students")}>{t.viewStudents} →</button></div>{levelRows.map(([name,value,count]) => <div className={`level-row ${String(name).toLowerCase()}`} key={name}><div><strong>{name}</strong><span>{count}</span></div><div className="bar"><i style={{ width:`${value}%` }} /></div><b>{value}%</b></div>)}</section><section className="compose-card"><span className="stat-icon amber">◌</span><h2>{t.newAnnouncement}</h2><p>Share updates with everyone or choose a specific course level.</p><button className="secondary-button" onClick={() => setModal("announcement")}>{t.startWriting} →</button></section></div>
     </div>;
   }
 
   function LearningPage() {
     const available = curriculumRecords.length ? curriculumRecords : modules.map(module => ({ id:`preview-${module.week}`, level:"beginner" as const, week:module.week, title_en:module.name, title_hu:module.hu }));
-    return <PageFrame eyebrow={t.semester} title={t.learning} description="Structured weekly guides, demonstrations and practical submissions."><div className="level-tabs"><button className="active" onClick={() => setToast("Beginner modules selected.")}>Beginner</button><button onClick={() => setToast("Intermediate unlocks after the beginner course.")}>Intermediate</button><button onClick={() => setToast("Advanced unlocks after the intermediate course.")}>Advanced</button></div><div className="module-grid">{available.map((m, index) => { const submission = submissionRecords.find(item => item.module?.week === m.week); const state = submission?.status === "reviewed" ? "Completed" : index === completedTechniqueCount ? "Current" : "Locked"; return <article className={`module-tile ${state.toLowerCase()}`} key={m.id}><div className="tile-top"><span>WEEK {String(m.week).padStart(2,"0")}</span><b>{state}</b></div><h3>{language === "hu" ? m.title_hu : m.title_en}</h3><p>Introduction, application, equipment, step-by-step guide and short video.</p><div className="tile-footer"><span>{submission?.score ? `${submission.score}/5` : state === "Locked" ? "○" : "12 min"}</span><button disabled={state === "Locked"} onClick={() => { setSelectedModule(m.week); setModal("lesson"); }}>{state === "Completed" ? "Review" : state === "Current" ? "Start" : "Locked"} →</button></div></article>; })}</div></PageFrame>;
+    return <PageFrame eyebrow={t.semester} title={t.learning} description="Structured weekly guides, demonstrations and practical submissions."><div className="course-level-banner"><span>{accountRank.toUpperCase()}</span><p>This is your assigned course level. Other levels remain private until your enrolment is updated.</p></div><div className="module-grid">{available.map((m, index) => { const submission = submissionRecords.find(item => item.module?.week === m.week); const state = submission?.status === "reviewed" ? "Completed" : index === completedTechniqueCount ? "Current" : "Locked"; return <article className={`module-tile ${state.toLowerCase()}`} key={m.id}><div className="tile-top"><span>WEEK {String(m.week).padStart(2,"0")}</span><b>{state}</b></div><h3>{language === "hu" ? m.title_hu : m.title_en}</h3><p>Introduction, application, equipment, step-by-step guide and short video.</p><div className="tile-footer"><span>{submission?.score ? `${submission.score}/5` : state === "Locked" ? "○" : "12 min"}</span><button disabled={state === "Locked"} onClick={() => { setSelectedModule(m.week); setModal("lesson"); }}>{state === "Completed" ? "Review" : state === "Current" ? "Start" : "Locked"} →</button></div></article>; })}</div></PageFrame>;
   }
 
   function SubmissionsPage() {
@@ -734,33 +781,41 @@ export default function Home() {
 
   function AchievementsPage() {
     const badges = [["◇","Secure foundations","Complete the first three modules",completedTechniqueCount>=3],["◎","Consistent practice","Submit work for three consecutive weeks",submissionRecords.length>=3],["✓","Demonstrator approved","Receive three “All done” reviews",reviewedSubmissions.filter(item=>item.outcome==="all_done").length>=3]] as const;
-    return <PageFrame eyebrow="YOUR RECORD" title={t.achievements} description="Formal milestones earned through reviewed practical work."><section className="certificate-hero"><Logo /><div><span className="eyebrow">CURRENT MILESTONE</span><h2>Beginner Surgical Skills</h2><p>{completedTechniqueCount === 0 ? "Your record is ready for your first approved technique." : `Complete ${13-completedTechniqueCount} more techniques to earn your first semester certificate.`}</p><div className="certificate-progress"><i style={{width:`${courseProgress}%`}} /></div><small>{completedTechniqueCount} of 13 techniques completed</small></div><button className="secondary-button" disabled={completedTechniqueCount < 13} onClick={() => setModal("certificate")}>{completedTechniqueCount < 13 ? "Not earned yet" : "Certificate preview →"}</button></section><div className="badge-grid">{badges.map(b => <article className={b[3]?"":"locked"} key={b[1]}><span>{b[0]}</span><h3>{b[1]}</h3><p>{b[2]}</p><small>{b[3]?"EARNED":"NOT EARNED"}</small></article>)}</div></PageFrame>;
+    return <PageFrame eyebrow="YOUR RECORD" title={t.achievements} description="Formal milestones earned through reviewed practical work."><section className="certificate-hero"><Logo /><div><span className="eyebrow">CURRENT MILESTONE</span><h2>{accountRank.replace(/^./, letter => letter.toUpperCase())} Surgical Skills</h2><p>{completedTechniqueCount === 0 ? "Your record is ready for your first approved technique." : `Complete ${Math.max(0, requiredTechniqueCount-completedTechniqueCount)} more techniques to earn your first semester certificate.`}</p><div className="certificate-progress"><i style={{width:`${courseProgress}%`}} /></div><small>{completedTechniqueCount} of {requiredTechniqueCount} techniques completed</small></div><button className="secondary-button" disabled={completedTechniqueCount < requiredTechniqueCount} onClick={() => setModal("certificate")}>{completedTechniqueCount < requiredTechniqueCount ? "Not earned yet" : "Certificate preview →"}</button></section><div className="badge-grid">{badges.map(b => <article className={b[3]?"":"locked"} key={b[1]}><span>{b[0]}</span><h3>{b[1]}</h3><p>{b[2]}</p><small>{b[3]?"EARNED":"NOT EARNED"}</small></article>)}</div></PageFrame>;
   }
 
   function AnnouncementsPage({staff}:{staff:boolean}) {
-    return <PageFrame eyebrow={t.semester} title={t.announcements} description={staff ? "Create, target and manage updates for every course level." : "Important updates from the demonstrator team."} action={staff ? <button className="primary-button" onClick={() => setModal("announcement")}>＋ {t.newAnnouncement}</button> : undefined}><div className="toolbar"><div className="filter-pills"><button className="active" onClick={() => setToast("Showing announcements available to this account.")}>Available</button></div></div>{dataBusy?<p className="modal-copy">Loading announcements…</p>:announcementRecords.length===0?<div className="empty-state"><span>○</span><h3>No announcements yet</h3><p>Messages from the demonstrator team will appear here.</p></div>:<div className="announcement-page-list">{announcementRecords.map(a => <article key={a.id??a.title}><div className="date-block"><strong>{a.date.split(" ")[0]}</strong><span>{a.date.split(" ")[1]}</span></div><div><div className="announcement-tags">{a.pinned && <span>PINNED</span>}<span>{a.target.toUpperCase()}</span></div><h3>{language === "hu" ? a.hu : a.title}</h3><p>{a.text}</p></div>{staff ? <button onClick={() => setModal("announcement")}>New →</button> : <button onClick={() => { if(a.id) void markAnnouncementsRead([a.id]); setToast("Announcement marked as read."); }}>{a.id&&readAnnouncementIds.includes(a.id)?"Read ✓":"Mark read"}</button>}</article>)}</div>}</PageFrame>;
+    return <PageFrame eyebrow={t.semester} title={t.announcements} description={staff ? "Create, target and manage updates for every course level." : "Important updates from the demonstrator team."} action={staff ? <button className="primary-button" onClick={() => setModal("announcement")}>＋ {t.newAnnouncement}</button> : undefined}>{dataBusy?<p className="modal-copy">Loading announcements…</p>:announcementRecords.length===0?<div className="empty-state"><span>○</span><h3>No announcements yet</h3><p>Messages from the demonstrator team will appear here.</p></div>:<div className="announcement-page-list">{announcementRecords.map(a => <article key={a.id??a.title}><div className="date-block"><strong>{a.date.split(" ")[0]}</strong><span>{a.date.split(" ")[1]}</span></div><div><div className="announcement-tags">{a.pinned && <span>PINNED</span>}<span>{a.target.toUpperCase()}</span></div><h3>{language === "hu" ? a.hu : a.title}</h3><p>{a.text}</p></div>{staff ? <button onClick={() => setModal("announcement")}>New →</button> : <button onClick={() => { if(a.id) void markAnnouncementsRead([a.id]); setToast("Announcement marked as read."); }}>{a.id&&readAnnouncementIds.includes(a.id)?"Read ✓":"Mark read"}</button>}</article>)}</div>}</PageFrame>;
   }
 
   function StudentsPage() {
-    return <PageFrame eyebrow={`${studentRecords.length} ACTIVE ${studentRecords.length===1?"MEMBER":"MEMBERS"}`} title={t.students} description="All demonstrators can monitor every enrolled student."><div className="toolbar"><label className="search-field">⌕<input aria-label={t.search} placeholder={t.search} /></label><div className="filter-pills"><button className="active" onClick={() => setToast("Showing all levels.")}>All levels</button><button onClick={() => setToast("Showing beginner students.")}>Beginner</button><button onClick={() => setToast("Showing intermediate students.")}>Intermediate</button></div></div>{dataBusy?<p className="modal-copy">Loading students…</p>:studentRecords.length===0?<div className="empty-state"><span>○</span><h3>No enrolled students yet</h3><p>Students will appear after they register with an active event code.</p></div>:<div className="student-directory">{studentRecords.map(s => <article key={s[5]??s[0]}><Avatar name={s[0]} src={s[8]} emoji={s[9]} /><div><strong>{s[0]}</strong><small>{s[2]} · Individual progress</small></div><div className="mini-progress"><i style={{width:s[3]}} /></div><b>{s[3]}</b><button onClick={() => {setSelectedStudent(s[0]);setModal("student");}}>View profile →</button></article>)}</div>}</PageFrame>;
+    const visibleStudents = studentRecords.filter(student => {
+      const matchesName = student[0].toLowerCase().includes(studentSearch.trim().toLowerCase());
+      const matchesLevel = studentLevelFilter === "all" || student[2].toLowerCase() === studentLevelFilter;
+      return matchesName && matchesLevel;
+    });
+    return <PageFrame eyebrow={`${studentRecords.length} ACTIVE ${studentRecords.length===1?"MEMBER":"MEMBERS"}`} title={t.students} description="All demonstrators can monitor every enrolled student."><div className="toolbar"><label className="search-field">⌕<input aria-label={t.search} placeholder={t.search} value={studentSearch} onChange={event => setStudentSearch(event.target.value)} /></label><div className="filter-pills">{(["all","beginner","intermediate","advanced"] as const).map(level => <button type="button" className={studentLevelFilter===level?"active":""} onClick={() => setStudentLevelFilter(level)} key={level}>{level === "all" ? "All levels" : level.replace(/^./, letter => letter.toUpperCase())}</button>)}</div></div>{dataBusy?<p className="modal-copy">Loading students…</p>:visibleStudents.length===0?<div className="empty-state"><span>○</span><h3>{studentRecords.length ? "No matching students" : "No enrolled students yet"}</h3><p>{studentRecords.length ? "Try a different name or course level." : "Students will appear after they register with an active event code."}</p></div>:<div className="student-directory">{visibleStudents.map(s => <article key={s[5]??s[0]}><Avatar name={s[0]} src={s[8]} emoji={s[9]} /><div><strong>{s[0]}</strong><small>{s[2]} · Individual progress</small></div><div className="mini-progress"><i style={{width:s[3]}} /></div><b>{s[3]}</b><button onClick={() => {setSelectedStudent(s[0]);setModal("student");}}>View profile →</button></article>)}</div>}</PageFrame>;
   }
 
   function AttendancePage() {
     const present = Object.values(attendance).filter(value => value === "Present").length;
     const late = Object.values(attendance).filter(value => value === "Late").length;
     const absent = Object.values(attendance).filter(value => value === "Absent").length;
-    return <PageFrame eyebrow={`SPRING SEMESTER · SESSION ${selectedSessionNumber} OF 10`} title={t.attendance} description="A shared ten-session register available to every demonstrator, with an accountable correction history.">
+    return <PageFrame eyebrow={`CURRENT SEMESTER · SESSION ${selectedSessionNumber} OF 10`} title={t.attendance} description="A shared ten-session register available to every demonstrator, with an accountable correction history.">
       <section className="policy-banner"><span>!</span><div><strong>Maximum two missed sessions</strong><p>A student remains eligible after zero, one or two absences. The third recorded absence changes the student to “Not eligible” and creates an email notification. Correcting the register recalculates eligibility.</p></div></section>
       <div className="attendance-summary"><article><strong>{present}</strong><span>Present</span></article><article><strong>{late}</strong><span>Late</span></article><article><strong>{absent}</strong><span>Absent</span></article><label><span>Semester session</span><select aria-label="Attendance session" value={selectedSessionNumber} onChange={event => void selectAttendanceSession(Number(event.target.value))}>{Array.from({length:10},(_,index)=>index+1).map(number=><option key={number} value={number}>Session {number} of 10{attendanceSessions.some(session=>session.session_number===number)?" · recorded":" · not recorded"}</option>)}</select></label></div>
+      <div className="attendance-bulk"><p>Unmarked students remain “Not recorded” and will not be changed.</p><button className="secondary-button" type="button" onClick={() => setAttendance(Object.fromEntries(studentRecords.map(student => [student[0], "Present" as AttendanceValue])))}>Mark everyone present</button><button className="secondary-button" type="button" onClick={() => setAttendance(Object.fromEntries(studentRecords.map(student => [student[0], "Not recorded" as AttendanceValue])))}>Clear selections</button></div>
       <section className="attendance-sheet total-overview"><div className="attendance-head"><span>Student</span>{Array.from({length:10},(_,index)=><span key={index}>S{index+1}</span>)}<span>Missed</span><span>Eligibility</span><span>Record session {selectedSessionNumber}</span></div>{studentRecords.map(student => {
         const id = student[5] ?? "";
         const recordedAbsences = Object.values(attendanceOverview[id] ?? {}).filter(value => value === "Absent").length;
-        const projectedAbsences = recordedAbsences + ((attendanceOverview[id]?.[selectedSessionNumber] !== "Absent" && attendance[student[0]] === "Absent") ? 1 : 0) - ((attendanceOverview[id]?.[selectedSessionNumber] === "Absent" && attendance[student[0]] !== "Absent") ? 1 : 0);
+        const selectedAttendance = attendance[student[0]];
+        const currentAttendance = attendanceOverview[id]?.[selectedSessionNumber];
+        const projectedAbsences = recordedAbsences + ((currentAttendance !== "Absent" && selectedAttendance === "Absent") ? 1 : 0) - ((currentAttendance === "Absent" && selectedAttendance !== "Absent" && selectedAttendance !== "Not recorded") ? 1 : 0);
         const blocked = projectedAbsences > 2;
         const warning = projectedAbsences === 2 && !blocked;
-        return <div className={`attendance-row ${blocked ? "blocked-row" : warning ? "warning-row" : ""}`} key={id || student[0]}><span className="student-cell"><Avatar name={student[0]} src={student[8]} emoji={student[9]} /><strong>{student[0]}<small>{student[2]}</small></strong></span>{Array.from({length:10},(_,index)=>index+1).map(number => { const value = number === selectedSessionNumber ? attendance[student[0]] : attendanceOverview[id]?.[number]; return <span className={`attendance-mark ${value?.toLowerCase() ?? "empty"} ${number === selectedSessionNumber ? "selected" : ""}`} title={value ?? "Not recorded"} key={number}>{value ? value[0] : "—"}</span>; })}<strong className={`absence-total ${blocked ? "blocked" : warning ? "warning" : ""}`}>{projectedAbsences}<small>/ 2</small></strong><b className={blocked ? "eligibility blocked" : warning ? "eligibility warning" : "eligibility"}>{blocked ? "Not eligible" : warning ? "Limit reached" : "Eligible"}</b><span className="attendance-controls">{(["Present","Late","Absent"] as const).map(value => <button type="button" aria-label={`${student[0]} ${value} for session ${selectedSessionNumber}`} key={value} className={attendance[student[0]] === value ? `active ${value.toLowerCase()}` : ""} onClick={() => setAttendance(current => ({...current,[student[0]]:value}))}>{value[0]}</button>)}</span></div>;
+        return <div className={`attendance-row ${blocked ? "blocked-row" : warning ? "warning-row" : ""}`} key={id || student[0]}><span className="student-cell"><Avatar name={student[0]} src={student[8]} emoji={student[9]} /><strong>{student[0]}<small>{student[2]}</small></strong></span>{Array.from({length:10},(_,index)=>index+1).map(number => { const pendingValue = attendance[student[0]]; const value = number === selectedSessionNumber && pendingValue !== "Not recorded" ? pendingValue : attendanceOverview[id]?.[number]; return <span className={`attendance-mark ${value?.toLowerCase() ?? "empty"} ${number === selectedSessionNumber ? "selected" : ""}`} title={value ?? "Not recorded"} key={number}>{value ? value[0] : "—"}</span>; })}<strong className={`absence-total ${blocked ? "blocked" : warning ? "warning" : ""}`}>{projectedAbsences}<small>/ 2</small></strong><b className={blocked ? "eligibility blocked" : warning ? "eligibility warning" : "eligibility"}>{blocked ? "Not eligible" : warning ? "Limit reached" : "Eligible"}</b><span className="attendance-controls">{(["Present","Late","Absent"] as const).map(value => <button type="button" aria-label={`${student[0]} ${value} for session ${selectedSessionNumber}`} key={value} className={attendance[student[0]] === value ? `active ${value.toLowerCase()}` : ""} onClick={() => setAttendance(current => ({...current,[student[0]]:value}))}>{value[0]}</button>)}</span></div>;
       })}</section>
-      <div className="sheet-actions"><p>Each save is timestamped with the responsible staff account.</p><button className="primary-button" disabled={dataBusy||studentRecords.length===0} onClick={saveAttendance}>Save attendance register →</button></div>
+      <div className="sheet-actions"><p>Each save is timestamped with the responsible staff account.</p><button className="primary-button" disabled={dataBusy||studentRecords.length===0||!Object.values(attendance).some(value=>value!=="Not recorded")} onClick={saveAttendance}>Save marked attendance →</button></div>
     </PageFrame>;
   }
 
@@ -769,7 +824,7 @@ export default function Home() {
     const session = attendanceSessions.find(item => item.session_number === sessionNumber);
     setActiveSessionId(session?.id ?? null);
     const next: Record<string, AttendanceValue> = {};
-    studentRecords.forEach(student => { next[student[0]] = student[5] ? attendanceOverview[student[5]]?.[sessionNumber] ?? "Present" : "Present"; });
+    studentRecords.forEach(student => { next[student[0]] = student[5] ? attendanceOverview[student[5]]?.[sessionNumber] ?? "Not recorded" : "Not recorded"; });
     setAttendance(next);
   }
 
@@ -777,8 +832,9 @@ export default function Home() {
     if (isLocalPreview) { setToast("Preview: attendance saved and eligibility recalculated."); return; }
     setDataBusy(true);
     try {
-      const records = studentRecords.filter(row=>row[5]).map(row=>({studentId:row[5],status:(attendance[row[0]]??"Present").toLowerCase()}));
-      const response = await fetch("/api/attendance", {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:activeSessionId,sessionNumber:selectedSessionNumber,semesterKey:"2026-spring",title:`Session ${selectedSessionNumber} of 10`,level:"beginner",records})});
+      const records = studentRecords.filter(row=>row[5]&&attendance[row[0]]&&attendance[row[0]]!=="Not recorded").map(row=>({studentId:row[5],status:attendance[row[0]].toLowerCase()}));
+      if (!records.length) { setToast("Mark at least one student before saving attendance."); return; }
+      const response = await fetch("/api/attendance", {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({sessionId:activeSessionId,sessionNumber:selectedSessionNumber,title:`Session ${selectedSessionNumber} of 10`,level:"beginner",records})});
       const result = await response.json();
       if (!response.ok) throw new Error(result.error??"Attendance could not be saved.");
       setActiveSessionId(result.sessionId); const pending=(result.notifications??[]).filter((item:{status:string})=>item.status!=="sent").length; const sent=(result.notifications??[]).filter((item:{status:string})=>item.status==="sent").length; setToast(`Attendance saved. Eligibility was recalculated.${sent?` ${sent} limit email sent.`:""}${pending?` ${pending} limit email queued until email delivery is configured.`:""}`);
@@ -879,36 +935,44 @@ export default function Home() {
       if (response.ok) event.currentTarget.reset();
     }
     return <PageFrame eyebrow="ADMINISTRATOR ONLY" title={t.administration} description="Manage demonstrator access, review safeguards and keep responsibility with one named administrator.">
+      <section className="system-readiness"><div className="section-heading compact"><div><span className="eyebrow">DEMO READINESS</span><h2>System status</h2></div><button className="secondary-button" type="button" onClick={() => void refreshPortalData()}>Refresh status</button></div><div className="readiness-grid">{[
+        ["Database", systemStatus?.database, "Accounts and academy records"],
+        ["Staff security", systemStatus?.staffMfa, "Authenticator required for staff"],
+        ["Retention schedule", systemStatus?.retentionSchedule, "Report-before-deletion safeguard"],
+        ["Email delivery", systemStatus?.email && systemStatus?.sender, "Required for absence notices and reports"],
+      ].map(([label,ready,detail])=><article className={ready?"ready":"attention"} key={String(label)}><span>{ready?"✓":"!"}</span><div><strong>{label}</strong><small>{detail}</small></div><b>{ready?"Ready":"Needs setup"}</b></article>)}</div></section>
       <div className="admin-grid"><section className="admin-identity"><span className="avatar large">{initials(accountName)}</span><div><span className="eyebrow">PRIMARY ADMINISTRATOR</span><h2>{accountName}</h2><p>Can issue and revoke demonstrator codes, correct attendance and review the audit history.</p></div><b>Protected role</b></section>
       <section className="code-panel"><div><span className="eyebrow">CONTROLLED ACCESS</span><h2>Registration access</h2><p>Approve staff by their exact email address. Student access uses an event code chosen by you.</p></div><form onSubmit={createStaffCode}><fieldset className="target-field"><legend>Account type</legend><div><button type="button" className={inviteRole==="student"?"active":""} onClick={()=>setInviteRole("student")}>Student event</button><button type="button" className={inviteRole==="demonstrator"?"active":""} onClick={()=>setInviteRole("demonstrator")}>Demonstrator</button><button type="button" className={inviteRole==="editor"?"active":""} onClick={()=>setInviteRole("editor")}>Curriculum editor</button></div></fieldset>{inviteRole==="student"?<><div className="form-grid"><label className="form-field"><span>Course level</span><select value={inviteLevel} onChange={e=>setInviteLevel(e.target.value as typeof inviteLevel)}><option value="beginner">Beginner</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option></select></label><label className="form-field"><span>Available places</span><input type="number" min="1" max="200" value={inviteMaxUses} onChange={e=>setInviteMaxUses(Number(e.target.value))}/></label></div><label className="form-field"><span>Your student event code</span><input value={studentInviteCode} onChange={e=>setStudentInviteCode(e.target.value.toUpperCase().replace(/\s/g,""))} minLength={6} maxLength={40} placeholder="e.g. SUTURE26" required /></label><div className="generated-code-note"><span>Student</span><p>You choose the code. Students enter it during registration; it expires after 48 hours.</p></div></>:<><label className="form-field"><span>Exact approved email address</span><input type="email" value={staffInviteEmail} onChange={e=>setStaffInviteEmail(e.target.value)} placeholder="name@example.com" required /></label><div className="generated-code-note"><span>Email only</span><p>This person registers with the same email address. No staff invitation code is needed.</p></div></>}<button className="primary-button" type="submit">{inviteRole==="student"?"Create student code":"Approve email"} →</button></form><div className="code-list">{staffCodes.length === 0 && <p className="modal-copy">New student codes and approved staff emails appear here.</p>}{staffCodes.map(item => <article key={item.code}><code>{item.code}</code><div><strong>{item.status}</strong><small>{item.expires}</small></div><button onClick={async () => { if (item.status !== "Active" || !item.id) { setToast("This access is no longer active."); return; } const response=await fetch(`/api/admin/invite-codes?id=${item.id}`,{method:"DELETE"}); if(response.ok) setStaffCodes(current=>current.map(code=>code.id===item.id?{...code,status:"Revoked",expires:"Revoked by administrator"}:code)); else setToast("The access could not be revoked."); }}>{item.status === "Active" ? "Revoke" : "Closed"}</button></article>)}</div></section></div>
       <section className="mfa-recovery"><div><span className="eyebrow">ACCOUNT RECOVERY</span><h2>Lost authenticator phone</h2><p>Reset a demonstrator or curriculum editor only after confirming their identity in person. The account is signed out everywhere and receives a fresh QR code at the next login.</p></div><form onSubmit={resetStaffMfa}><label className="form-field"><span>Staff account email</span><input name="staffEmail" type="email" placeholder="name@example.com" required /></label><button className="secondary-button" type="submit">Reset authenticator →</button></form></section>
-      <section className="security-section"><div className="section-heading"><div><span className="eyebrow">LAUNCH SAFEGUARDS</span><h2>Security & data responsibilities</h2></div><button className="secondary-button" onClick={() => setToast("Security checklist marked for the launch review.")}>Review checklist</button></div><div className="security-grid"><article><span>01</span><h3>Identity & roles</h3><p>Managed password authentication, verified email, staff MFA and server-side checks for student, demonstrator and administrator permissions.</p></article><article><span>02</span><h3>Structured records</h3><p>The database separates accounts, codes, modules, attendance, submissions, announcements and audit events.</p></article><article><span>03</span><h3>Private photo storage</h3><p>Uploads use private object storage with short-lived links, file validation and the agreed six-month retention period.</p></article><article><span>04</span><h3>Accountability</h3><p>Code creation, attendance changes and submission reviews are timestamped with the responsible staff account.</p></article></div></section>
+      <section className="audit-section"><div className="section-heading compact"><div><span className="eyebrow">ACCOUNTABILITY</span><h2>Recent protected activity</h2></div><span className="status-chip">Latest 30 events</span></div>{auditLogs.length?<div className="audit-list">{auditLogs.slice(0,8).map(log=><article key={log.id}><span>{log.action.startsWith("attendance")?"▦":log.action.startsWith("announcement")?"◌":log.action.startsWith("curriculum")?"▤":"✓"}</span><div><strong>{log.action.replaceAll("."," · ")}</strong><small>{log.actor?.full_name??"System"} · {new Date(log.created_at).toLocaleString()}</small></div><b>{log.entity_type}</b></article>)}</div>:<div className="empty-state compact"><span>○</span><h3>No protected activity yet</h3><p>Attendance, reviews, announcements and access changes will appear here.</p></div>}</section>
+      <section className="security-section"><div className="section-heading"><div><span className="eyebrow">LAUNCH SAFEGUARDS</span><h2>Security & data responsibilities</h2></div><span className="status-chip">Safeguards documented</span></div><div className="security-grid"><article><span>01</span><h3>Identity & roles</h3><p>Managed password authentication, verified email, staff MFA and server-side checks for student, demonstrator and administrator permissions.</p></article><article><span>02</span><h3>Structured records</h3><p>The database separates accounts, codes, modules, attendance, submissions, announcements and audit events.</p></article><article><span>03</span><h3>Private photo storage</h3><p>Uploads use private object storage with short-lived links, file validation and the agreed six-month retention period.</p></article><article><span>04</span><h3>Accountability</h3><p>Code creation, attendance changes and submission reviews are timestamped with the responsible staff account.</p></article></div></section>
     </PageFrame>;
   }
 
   function ReviewsPage() {
-    return <PageFrame eyebrow={`${submissionRecords.filter(item=>item.status!=="reviewed").length} PENDING`} title={t.reviews} description="Open a submission, assess the technique and return private feedback."><div className="toolbar"><div className="filter-pills"><button className="active" onClick={() => setToast("Showing new and resubmitted work.")}>Pending</button><button onClick={() => setToast("Reviewed work remains in the private record.")}>Completed</button></div></div><section className="review-panel"><ReviewTable /></section></PageFrame>;
+    return <PageFrame eyebrow={`${submissionRecords.filter(item=>item.status!=="reviewed").length} PENDING`} title={t.reviews} description="Open a submission, assess the technique and return private feedback."><div className="toolbar"><div className="filter-pills"><button type="button" className={reviewFilter==="pending"?"active":""} onClick={() => setReviewFilter("pending")}>Pending</button><button type="button" className={reviewFilter==="completed"?"active":""} onClick={() => setReviewFilter("completed")}>Completed</button></div></div><section className="review-panel"><ReviewTable /></section></PageFrame>;
   }
 
   function ReportsPage() {
-    return <PageFrame eyebrow="PLANNED BEFORE SEMESTER CLOSE" title={t.reports} description="The report workflow is being prepared and is not active yet."><section className="report-hero"><div><span className="stat-icon burgundy">□</span><h2>Semester progress reports</h2><p>The final system will generate each student’s completed techniques, scores, attendance and private feedback before any submission photograph becomes eligible for deletion.</p></div><button className="primary-button" disabled>Not active yet</button></section><div className="report-grid"><article><span>01</span><h3>Generate</h3><p>Create a private report from verified course records.</p></article><article><span>02</span><h3>Deliver</h3><p>Email the report to the student and record successful delivery.</p></article><article><span>03</span><h3>Delete safely</h3><p>Only then may six-month-old photographs enter the deletion queue. No automatic photo deletion is active today.</p></article></div></PageFrame>;
+    return <PageFrame eyebrow="REPORT-BEFORE-DELETION SAFEGUARD" title={t.reports} description="The protected workflow is installed; email delivery must be connected before it can run."><section className="report-hero"><div><span className="stat-icon burgundy">□</span><h2>Semester progress reports</h2><p>After six months, the system prepares each student’s completed techniques, scores and private feedback, sends the report, and only then deletes the related submission photographs. If email fails, the photographs remain stored.</p></div><span className="status-chip attention">Email setup required</span></section><div className="report-grid"><article><span>01</span><h3>Generate</h3><p>Create a private report from verified course records.</p></article><article><span>02</span><h3>Deliver</h3><p>Email the report to the student and record successful delivery.</p></article><article><span>03</span><h3>Delete safely</h3><p>Only successfully reported photographs become eligible for deletion.</p></article></div></PageFrame>;
   }
 
   function ProfilePage() {
     const emojiChoices = ["🧑‍⚕️", "👩‍⚕️", "👨‍⚕️", "🩺", "🧵", "🪡", "🫀", "✨"];
-    return <PageFrame eyebrow={role === "student" ? t.studentArea : t.staffArea} title={t.profile} description="Manage your personal details, profile picture, language and notification preferences.">
+    return <PageFrame eyebrow={role === "student" ? t.studentArea : t.staffArea} title={t.profile} description="Manage your personal details, profile picture and interface language.">
       <form className="profile-form" onSubmit={async event => {
         event.preventDefault();
         if (isLocalPreview) { completeAction("Preview: profile changes saved locally."); return; }
         const response = await fetch("/api/me", { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ fullName:accountName, language, avatarEmoji:accountAvatarEmoji || null }) });
         const result = await response.json().catch(() => ({}));
+        if (response.ok) savedProfile.current = { name: accountName, language, avatarUrl: accountAvatarUrl, avatarEmoji: accountAvatarEmoji };
         completeAction(response.ok ? "Profile changes saved." : result.error ?? "Profile changes could not be saved.");
       }}>
         <div className="profile-identity"><Avatar name={accountName} src={accountAvatarUrl} emoji={accountAvatarEmoji} className="large" /><div><h2>{accountName}</h2><p>{role === "student" ? t.beginner : isAdmin ? "Administrator" : isCurriculumEditor ? "Curriculum editor" : "Demonstrator"}</p><button className="profile-photo-button" type="button" disabled={dataBusy} onClick={() => profilePhotoInput.current?.click()}>{accountAvatarUrl ? "Change profile picture" : "Add a profile picture"}</button><small>Upload a private photo or choose an emoji. Otherwise, we show a surgeon placeholder.</small><input ref={profilePhotoInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={event => void uploadProfilePhoto(event.target.files?.[0])} /></div></div>
         <fieldset className="emoji-picker"><legend>Choose an emoji profile picture</legend><div>{emojiChoices.map(emoji => <button type="button" className={accountAvatarEmoji === emoji && !accountAvatarUrl ? "selected" : ""} key={emoji} onClick={() => { setAccountAvatarEmoji(emoji); setAccountAvatarUrl(""); }} aria-label={`Use ${emoji} as profile picture`}>{emoji}</button>)}</div><label><span>Or paste another emoji</span><input value={accountAvatarEmoji} maxLength={16} onChange={event => { setAccountAvatarEmoji(event.target.value); setAccountAvatarUrl(""); }} placeholder="🙂" /></label></fieldset>
-        <div className="form-grid"><label className="form-field"><span>{t.fullName}</span><input value={accountName} minLength={2} maxLength={120} onChange={event => setAccountName(event.target.value)} required /></label><label className="form-field"><span>{t.email}</span><input value={accountEmail} readOnly /></label><label className="form-field"><span>Interface language</span><select value={language} onChange={event => setLanguage(event.target.value as Language)}><option value="en">English</option><option value="hu">Magyar</option></select></label><label className="form-field"><span>Email notifications</span><select defaultValue="important"><option value="important">Important updates and feedback</option><option value="all">All activity</option><option value="none">None</option></select></label></div>
+        <div className="form-grid"><label className="form-field"><span>{t.fullName}</span><input value={accountName} minLength={2} maxLength={120} onChange={event => setAccountName(event.target.value)} required /></label><label className="form-field"><span>{t.email}</span><input value={accountEmail} readOnly /></label><label className="form-field"><span>Interface language</span><select value={language} onChange={event => setLanguage(event.target.value as Language)}><option value="en">English</option><option value="hu">Magyar</option></select></label></div>
         {role === "staff"&&<section className="backup-authenticator"><div><strong>Authenticator recovery</strong><p>Add the same account to a second trusted phone or password manager. Supabase supports multiple authenticator factors instead of recovery codes.</p></div><button className="secondary-button" type="button" disabled={authBusy} onClick={()=>void addBackupAuthenticator()}>Add backup authenticator →</button></section>}
-        <div className="form-actions"><button className="secondary-button" type="button" onClick={() => setToast("No profile changes were made.")}>{t.cancel}</button><button className="primary-button" type="submit">{t.save}</button></div>
+        <div className="form-actions"><button className="secondary-button" type="button" onClick={() => { const saved=savedProfile.current; setAccountName(saved.name); setLanguage(saved.language); setAccountAvatarUrl(saved.avatarUrl); setAccountAvatarEmoji(saved.avatarEmoji); setToast("Unsaved profile changes were discarded."); }}>{t.cancel}</button><button className="primary-button" type="submit">{t.save}</button></div>
       </form>
     </PageFrame>;
   }
@@ -917,23 +981,24 @@ export default function Home() {
     return announcementRecords.length ? <div className="announcement-list">{announcementRecords.slice(0,limit).map(a => <article key={a.id??a.title}><div className="date-block"><strong>{a.date.split(" ")[0]}</strong><span>{a.date.split(" ")[1]}</span></div><div>{a.pinned && <span className="pin">PINNED</span>}<h3>{language === "hu" ? a.hu : a.title}</h3><p>{a.text}</p></div></article>)}</div> : <div className="empty-state compact"><span>○</span><h3>No announcements yet</h3><p>New demonstrator messages will appear here.</p></div>;
   }
 
-  function ReviewTable({limit}:{limit?:number}) {
+  function ReviewTable({limit,mode=reviewFilter}:{limit?:number;mode?:"pending"|"completed"}) {
     if (!isLocalPreview) {
-      const rows=submissionRecords.filter(item=>item.status!=="reviewed").slice(0,limit);
-      return <div className="review-table"><div className="table-row table-head"><span>{t.student}</span><span>Technique</span><span>Submitted</span><span>Status</span><span /></div>{rows.length===0?<p className="modal-copy">No submissions are waiting for review.</p>:rows.map(item=><div className="table-row" key={item.id}><span className="student-cell"><i className="avatar">{initials(item.student?.full_name??"Student")}</i><strong>{item.student?.full_name??"Student"}</strong></span><span>{item.module?.title_en??"Technique"}</span><span>{new Date(item.created_at).toLocaleDateString()}</span><span><b className={item.status==="resubmit"?"resubmitted":"new"}>{item.status==="resubmit"?"Resubmitted":"New"}</b></span><span><button onClick={()=>void openReview(item)}>{t.review} →</button></span></div>)}</div>;
+      const rows=submissionRecords.filter(item=>mode==="completed"?item.status==="reviewed":item.status!=="reviewed").slice(0,limit);
+      return <div className="review-table"><div className="table-row table-head"><span>{t.student}</span><span>Technique</span><span>Submitted</span><span>Status</span><span /></div>{rows.length===0?<p className="modal-copy">{mode==="completed"?"No completed reviews yet.":"No submissions are waiting for review."}</p>:rows.map(item=><div className="table-row" key={item.id}><span className="student-cell"><i className="avatar">{initials(item.student?.full_name??"Student")}</i><strong>{item.student?.full_name??"Student"}</strong></span><span>{item.module?.title_en??"Technique"}</span><span>{new Date(item.created_at).toLocaleDateString()}</span><span><b className={item.status==="reviewed"?"approved":item.status==="resubmit"?"resubmitted":"new"}>{item.status==="reviewed"?"Completed":item.status==="resubmit"?"Resubmitted":"New"}</b></span><span>{item.status==="reviewed"?<button onClick={()=>{setSelectedSubmissionId(item.id);setSelectedStudent(item.student?.full_name??"Student");setModal("feedback");}}>View →</button>:<button onClick={()=>void openReview(item)}>{t.review} →</button>}</span></div>)}</div>;
     }
-    const rows = studentRecords.slice(0,limit);
-    return <div className="review-table"><div className="table-row table-head"><span>{t.student}</span><span>Technique</span><span>Submitted</span><span>Status</span><span /></div>{rows.map((s,i) => <div className="table-row" key={s[0]}><span className="student-cell"><i className="avatar">{s[1]}</i><strong>{s[0]}</strong></span><span>{s[4]}</span><span>{i < 2 ? "Today" : "Yesterday"}</span><span><b className={i === 2 ? "resubmitted" : "new"}>{i === 2 ? "Resubmitted" : "New"}</b></span><span><button onClick={() => {setSelectedStudent(s[0]);setModal("review");}}>{t.review} →</button></span></div>)}</div>;
+    if (!submissionRecords.length) return <div className="review-table"><div className="table-row table-head"><span>{t.student}</span><span>Technique</span><span>Submitted</span><span>Status</span><span /></div><p className="modal-copy">{mode==="completed"?"No completed reviews yet.":"No submissions are waiting for review."}</p></div>;
+    const rows = (mode === "completed" ? studentRecords.slice(0,2) : studentRecords).slice(0,limit);
+    return <div className="review-table"><div className="table-row table-head"><span>{t.student}</span><span>Technique</span><span>Submitted</span><span>Status</span><span /></div>{rows.map((s,i) => <div className="table-row" key={s[0]}><span className="student-cell"><i className="avatar">{s[1]}</i><strong>{s[0]}</strong></span><span>{s[4]}</span><span>{i < 2 ? "Today" : "Yesterday"}</span><span><b className={mode==="completed"?"approved":i === 2 ? "resubmitted" : "new"}>{mode==="completed"?"Completed":i === 2 ? "Resubmitted" : "New"}</b></span><span><button onClick={() => {setSelectedStudent(s[0]);setModal(mode==="completed"?"feedback":"review");}}>{mode==="completed"?"View":t.review} →</button></span></div>)}</div>;
   }
 
   function renderModal() {
     if (!modal) return null;
     if (modal === "privacy") return <ModalShell title="Privacy notice · draft for approval" onClose={() => setModal(null)} wide><PrivacyNotice /></ModalShell>;
     if (modal === "notifications") return <ModalShell title="Notifications" onClose={() => setModal(null)}>{announcementRecords.length ? <div className="notification-list">{announcementRecords.slice(0,8).map(item => <article key={item.id??item.title} className={item.id&&readAnnouncementIds.includes(item.id)?"read":""}><span>●</span><div><strong>{item.title}</strong><p>{item.text}</p></div></article>)}</div> : <div className="empty-state compact"><span>○</span><h3>You are all caught up</h3><p>Demonstrator announcements will appear in this inbox.</p></div>}<button className="secondary-button full-button" disabled={unreadAnnouncements.length===0} onClick={() => {void markAnnouncementsRead();completeAction("All notifications marked as read.");}}>Mark all as read</button></ModalShell>;
-    if (modal === "lesson") { const live=curriculumRecords.find(x=>x.week===selectedModule); const fallback=modules.find(x=>x.week===selectedModule) || modules[3]; const video=live?.assets.find(asset=>asset.kind==="video"&&asset.url); const images=live?.assets.filter(asset=>asset.kind==="image"&&asset.url)??[]; const title=live?(language==="hu"?live.title_hu:live.title_en):(language==="hu"?fallback.hu:fallback.name); const equipment=live?(language==="hu"?live.equipment_hu:live.equipment_en):"Use a needle holder, toothed forceps, scissors, 3-0 practice suture and a synthetic pad."; const technique=live?(language==="hu"?live.technique_hu:live.technique_en):"Follow each step slowly and maintain consistent tissue handling."; const steps=live?(language==="hu"?live.steps_hu:live.steps_en):["Enter the tissue at a 90° angle.","Follow the natural curve of the needle.","Mirror the bite on the opposite side.","Tie a secure square knot without excess tension."]; return <ModalShell title={title} onClose={() => setModal(null)} wide><div className="lesson-layout"><div className="lesson-media">{video?.url?<video src={video.url} controls preload="metadata"/>:images[0]?.url?<Image src={images[0].url} width={720} height={480} unoptimized alt={images[0].caption??title}/>:<div className="lesson-video"><span>▶</span><small>TEACHING MEDIA</small></div>}{live?.video_url&&<a href={live.video_url} target="_blank" rel="noreferrer">Open external teaching video ↗</a>}{images.length>1&&<div className="lesson-image-strip">{images.slice(1).map(image=><Image key={image.id} src={image.url!} width={180} height={120} unoptimized alt={image.caption??title}/>)}</div>}</div><div><span className="eyebrow">WEEK {String(live?.week??fallback.week).padStart(2,"0")} · {live?.level??fallback.level}</span><h3>{language==="hu"?"Technikai útmutató":"Technique guide"}</h3>{live&&(language==="hu"?live.introduction_hu:live.introduction_en)&&<p>{language==="hu"?live.introduction_hu:live.introduction_en}</p>}<p>{technique}</p><h4>{language==="hu"?"Eszközök":"Equipment"}</h4><p>{equipment}</p><ol>{steps.map((step,index)=><li key={`${index}-${step}`}>{step}</li>)}</ol>{live&&(language==="hu"?live.application_hu:live.application_en)&&<><h4>{language==="hu"?"Alkalmazás":"Application"}</h4><p>{language==="hu"?live.application_hu:live.application_en}</p></>}<div className="modal-actions"><button className="secondary-button" onClick={() => completeAction("Lesson marked for later.")}>Save for later</button><button className="primary-button" onClick={() => setModal("upload")}>{t.submitWork} →</button></div></div></div></ModalShell>; }
+    if (modal === "lesson") { const live=curriculumRecords.find(x=>x.week===selectedModule); const fallback=modules.find(x=>x.week===selectedModule) || modules[3]; const video=live?.assets.find(asset=>asset.kind==="video"&&asset.url); const images=live?.assets.filter(asset=>asset.kind==="image"&&asset.url)??[]; const title=live?(language==="hu"?live.title_hu:live.title_en):(language==="hu"?fallback.hu:fallback.name); const equipment=live?(language==="hu"?live.equipment_hu:live.equipment_en):"Use a needle holder, toothed forceps, scissors, 3-0 practice suture and a synthetic pad."; const technique=live?(language==="hu"?live.technique_hu:live.technique_en):"Follow each step slowly and maintain consistent tissue handling."; const steps=live?(language==="hu"?live.steps_hu:live.steps_en):["Enter the tissue at a 90° angle.","Follow the natural curve of the needle.","Mirror the bite on the opposite side.","Tie a secure square knot without excess tension."]; return <ModalShell title={title} onClose={() => setModal(null)} wide><div className="lesson-layout"><div className="lesson-media">{video?.url?<video src={video.url} controls preload="metadata"/>:images[0]?.url?<Image src={images[0].url} width={720} height={480} unoptimized alt={images[0].caption??title}/>:<div className="lesson-video"><span>▶</span><small>TEACHING MEDIA</small></div>}{live?.video_url&&<a href={live.video_url} target="_blank" rel="noreferrer">Open external teaching video ↗</a>}{images.length>1&&<div className="lesson-image-strip">{images.slice(1).map(image=><Image key={image.id} src={image.url!} width={180} height={120} unoptimized alt={image.caption??title}/>)}</div>}</div><div><span className="eyebrow">WEEK {String(live?.week??fallback.week).padStart(2,"0")} · {live?.level??fallback.level}</span><h3>{language==="hu"?"Technikai útmutató":"Technique guide"}</h3>{live&&(language==="hu"?live.introduction_hu:live.introduction_en)&&<p>{language==="hu"?live.introduction_hu:live.introduction_en}</p>}<p>{technique}</p><h4>{language==="hu"?"Eszközök":"Equipment"}</h4><p>{equipment}</p><ol>{steps.map((step,index)=><li key={`${index}-${step}`}>{step}</li>)}</ol>{live&&(language==="hu"?live.application_hu:live.application_en)&&<><h4>{language==="hu"?"Alkalmazás":"Application"}</h4><p>{language==="hu"?live.application_hu:live.application_en}</p></>}<div className="modal-actions"><button className="primary-button" onClick={() => setModal("upload")}>{t.submitWork} →</button></div></div></div></ModalShell>; }
     if (modal === "upload") return <ModalShell title={t.submitWork} onClose={() => {setModal(null);setSelectedFile("");selectedUpload.current=null;}}><form onSubmit={submitPhoto}><p className="modal-copy">Upload one clear JPG, PNG or WebP photo, up to 10 MB. It remains private between you and the demonstrator team.</p><button type="button" className={`dropzone ${selectedFile ? "has-file" : ""}`} onClick={() => fileInput.current?.click()}><span>{selectedFile ? "✓" : "↥"}</span><strong>{selectedFile || "Choose photo"}</strong></button><input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e => {selectedUpload.current=e.target.files?.[0]??null;setSelectedFile(e.target.files?.[0]?.name || "");}} /><label className="reflection-label">Optional reflection<textarea name="reflection" maxLength={1000} placeholder="What felt easy or difficult?" /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" type="submit" disabled={!selectedFile||dataBusy}>{dataBusy?"Uploading…":t.send}</button></div></form></ModalShell>;
     if (modal === "feedback") {const item=submissionRecords.find(entry=>entry.id===selectedSubmissionId);return <ModalShell title="Demonstrator feedback" onClose={() => setModal(null)}><div className="feedback-detail"><div className="feedback-head"><span className="avatar staff">SF</span><div><strong>Demonstrator team</strong><small>{item?.module?.title_en??"Technique"}</small></div><span className="score">{item?.score??4}<span>/5</span></span></div><div className="feedback-status"><span>✓</span><strong>{item?.outcome==="more_practice"?"A little more practice":t.allDone}</strong></div><blockquote>{item?.feedback??"Good needle angles and consistent spacing. Continue practising consistent tension."}</blockquote></div><button className="primary-button full-button" onClick={() => setModal(null)}>{t.close}</button></ModalShell>;}
-    if (modal === "certificate") return <ModalShell title="Certificate preview" onClose={() => setModal(null)}><div className="certificate-preview"><Logo /><span>SURGICAL SOCIETY PÉCS</span><h3>Certificate of Completion</h3><p>This certifies that <strong>Anna Nagy</strong> has successfully completed the Beginner Surgical Skills programme.</p><small>Preview · issued after all 13 techniques are approved</small></div><button className="primary-button full-button" onClick={() => completeAction("Certificate preview downloaded.")}>{t.download}</button></ModalShell>;
+    if (modal === "certificate") return <ModalShell title="Certificate preview" onClose={() => setModal(null)}><div className="certificate-preview"><Logo /><span>SURGICAL SOCIETY PÉCS</span><h3>Certificate of Completion</h3><p>This certifies that <strong>{accountName}</strong> has successfully completed the {accountRank.replace(/^./, letter => letter.toUpperCase())} Surgical Skills programme.</p><small>Issued after all {requiredTechniqueCount} techniques are approved</small></div><button className="primary-button full-button" onClick={() => window.print()}>Print or save as PDF</button></ModalShell>;
     if (modal === "review") return <ModalShell title={`Review · ${selectedStudent}`} onClose={() => setModal(null)} wide><div className="review-workspace"><div className="submission-preview"><span>STUDENT SUBMISSION</span>{reviewImageUrl?<Image src={reviewImageUrl} width={720} height={540} unoptimized alt={`Private submission by ${selectedStudent}`}/>:<div>{isLocalPreview?"Photo preview":"Loading private photo…"}</div>}<small>{submissionRecords.find(item=>item.id===selectedSubmissionId)?.module?.title_en??"Simple interrupted suture"} · private link expires in 5 minutes</small></div><form onSubmit={saveReview}><label>Score</label><div className="score-buttons">{[1,2,3,4,5].map(n=><button type="button" className={score===n?"active":""} onClick={()=>setScore(n)} key={n}>{n}</button>)}</div><label>Outcome</label><div className="outcome-buttons"><button type="button" className={reviewResult==="All done"?"active":""} onClick={()=>setReviewResult("All done")}>All done</button><button type="button" className={reviewResult!=="All done"?"active":""} onClick={()=>setReviewResult("A little more practice")}>A little more practice</button></div><label className="reflection-label">Optional feedback<textarea name="feedback" maxLength={2000} placeholder="Add clear, encouraging feedback…" /></label><button className="primary-button full-button" type="submit">Save and return feedback</button></form></div></ModalShell>;
     if (modal === "announcement") return <ModalShell title={t.newAnnouncement} onClose={() => setModal(null)}><form onSubmit={publishAnnouncement}><label className="form-field"><span>Title</span><input name="title" maxLength={160} required placeholder="Announcement title" /></label><label className="reflection-label">Message<textarea name="message" maxLength={4000} required placeholder="Write the announcement…" /></label><fieldset className="target-field"><legend>Target group</legend><div>{["Everyone","Beginner","Intermediate","Advanced"].map(x=><button type="button" className={announcementTarget===x?"active":""} onClick={()=>setAnnouncementTarget(x)} key={x}>{x}</button>)}</div></fieldset><label className="check-row"><input name="pinned" type="checkbox" /> Pin this announcement</label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" type="submit">{t.publish}</button></div></form></ModalShell>;
     if (modal === "student") return <ModalShell title={selectedStudent} onClose={() => setModal(null)}><div className="student-detail"><Avatar name={selectedStudent} src={studentRecords.find(s=>s[0]===selectedStudent)?.[8]} emoji={studentRecords.find(s=>s[0]===selectedStudent)?.[9]} className="large" /><h3>{selectedStudent}</h3><p>{studentRecords.find(s=>s[0]===selectedStudent)?.[2]} · {studentRecords.find(s=>s[0]===selectedStudent)?.[3]} complete</p><div className="detail-stats"><span><strong>{submissionRecords.filter(item=>item.student?.full_name===selectedStudent&&item.status==="reviewed").length}</strong>Completed</span><span><strong>{submissionRecords.filter(item=>item.student?.full_name===selectedStudent&&item.status==="pending").length}</strong>Pending</span></div><button className="secondary-button full-button" onClick={() => {setModal(null);setStaffPage("reviews");}}>Open submissions →</button></div></ModalShell>;
@@ -946,7 +1011,27 @@ function PageFrame({eyebrow,title,description,action,children}:{eyebrow:string;t
 }
 
 function ModalShell({title,onClose,wide=false,children}:{title:string;onClose:()=>void;wide?:boolean;children:React.ReactNode}) {
-  return <div className="modal-backdrop" role="presentation" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section className={`upload-modal ${wide?"wide":""}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-head"><h2>{title}</h2><button aria-label="Close dialog" onClick={onClose}>×</button></div>{children}</section></div>;
+  const dialogRef = useRef<HTMLElement>(null);
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])') ?? []);
+    focusable()[0]?.focus();
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") { event.preventDefault(); closeRef.current(); return; }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (!items.length) return;
+      const first = items[0]; const last = items.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => { document.removeEventListener("keydown", handleKey); previous?.focus(); };
+  }, []);
+  return <div className="modal-backdrop" role="presentation" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section ref={dialogRef} className={`upload-modal ${wide?"wide":""}`} role="dialog" aria-modal="true" aria-label={title}><div className="modal-head"><h2>{title}</h2><button aria-label="Close dialog" onClick={onClose}>×</button></div>{children}</section></div>;
 }
 
 function PrivacyNotice() {
