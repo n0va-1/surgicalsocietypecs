@@ -10,7 +10,7 @@ export async function GET() {
   if ((await getMfaState()).currentLevel !== "aal2") return NextResponse.json({ error: "Please verify your authenticator to view invitation codes." }, { status: 403 });
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("invite_codes").select("id,role,course_level,curriculum_editor,allowed_email,max_uses,uses,expires_at,revoked_at,created_at").order("created_at", { ascending: false });
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ codes: data });
+  return error ? NextResponse.json({ error: "Invitation access could not be loaded." }, { status: 500 }) : NextResponse.json({ codes: data });
 }
 
 export async function POST(request: Request) {
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     invite_max_uses: Math.max(1, Math.min(body?.maxUses ?? 1, 200)), invite_expires_at: body?.expiresAt ?? new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
     creator_id: profile.id,
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) return NextResponse.json({ error: "The student event code could not be created." }, { status: 400 });
   return NextResponse.json({ id: data, code }, { status: 201 });
 }
 
@@ -55,5 +55,5 @@ export async function DELETE(request: Request) {
   if (!id) return NextResponse.json({ error: "Code id required" }, { status: 400 });
   const admin = createSupabaseAdminClient();
   const { error } = await admin.from("invite_codes").update({ revoked_at: new Date().toISOString() }).eq("id", id);
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ ok: true });
+  return error ? NextResponse.json({ error: "The invitation access could not be revoked." }, { status: 500 }) : NextResponse.json({ ok: true });
 }

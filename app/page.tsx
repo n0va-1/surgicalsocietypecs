@@ -569,8 +569,8 @@ export default function Home() {
       const avatarPath = `${user.id}/profile-picture`;
       const { error: uploadError } = await supabase.storage.from("avatars").upload(avatarPath, file, { contentType: file.type, upsert: true });
       if (uploadError) throw uploadError;
-      const { error: profileError } = await supabase.from("profiles").update({ avatar_path: avatarPath, updated_at: new Date().toISOString() }).eq("id", user.id);
-      if (profileError) throw profileError;
+      const profileResponse = await fetch("/api/me/avatar", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ objectKey:avatarPath }) });
+      if (!profileResponse.ok) throw new Error((await profileResponse.json()).error ?? "Profile picture could not be saved.");
       const { data } = await supabase.storage.from("avatars").createSignedUrl(avatarPath, 3600);
       setAccountAvatarUrl(data?.signedUrl ?? "");
       setAccountAvatarEmoji("");

@@ -12,7 +12,7 @@ export async function GET() {
     admin.from("submissions").select("student_id,status,score,created_at"),
     admin.from("attendance_records").select("student_id,status,recorded_at"),
   ]);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Students could not be loaded." }, { status: 500 });
   const students = await Promise.all((profiles ?? []).map(async profile => {
     const work = (submissions ?? []).filter(item => item.student_id === profile.id);
     const records = (attendance ?? []).filter(item => item.student_id === profile.id);

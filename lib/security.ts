@@ -38,25 +38,18 @@ export async function isFailedAttemptRateLimited(request: Request, scope: string
   const bucket = rateLimitBucket(request, scope, subject);
   if (!bucket) return true;
   const admin = createSupabaseAdminClient();
-  const windowStart = new Date(Date.now() - windowSeconds * 1000).toISOString();
-  const { count, error } = await admin.from("audit_logs")
-    .select("id", { count: "exact", head: true })
-    .eq("action", "security.failed_attempt")
-    .eq("entity_type", scope.slice(0, 80))
-    .contains("metadata", { bucket })
-    .gte("created_at", windowStart);
-  return Boolean(error) || (count ?? maxFailures) >= maxFailures;
+  const { data, error } = await admin.rpc("security_rate_limit_reached", {
+    requested_bucket: bucket, maximum_requests: maxFailures, window_seconds: windowSeconds,
+  });
+  return Boolean(error) || data !== false;
 }
 
 export async function recordFailedAttempt(request: Request, scope: string, subject = "") {
   const bucket = rateLimitBucket(request, scope, subject);
   if (!bucket) return;
   const admin = createSupabaseAdminClient();
-  await admin.from("audit_logs").insert({
-    action: "security.failed_attempt",
-    entity_type: scope.slice(0, 80),
-    entity_id: "rate-limit",
-    metadata: { bucket },
+  await admin.rpc("consume_security_rate_limit", {
+    requested_bucket: bucket, maximum_requests: 2_147_483_647, window_seconds: 600,
   });
 }
 
@@ -65,18 +58,8 @@ export async function consumeRateLimit(request: Request, scope: string, maxReque
   if (!secret) return false;
   const digest = createHmac("sha256", secret).update(`${scope}:${rateLimitIdentity(request)}`).digest("hex");
   const admin = createSupabaseAdminClient();
-  const windowStart = new Date(Date.now() - windowSeconds * 1000).toISOString();
-  const { count, error } = await admin.from("audit_logs")
-    .select("id", { count: "exact", head: true })
-    .eq("action", "security.rate_limit")
-    .contains("metadata", { bucket: digest })
-    .gte("created_at", windowStart);
-  if (error || (count ?? maxRequests) >= maxRequests) return false;
-  const { error: insertError } = await admin.from("audit_logs").insert({
-    action: "security.rate_limit",
-    entity_type: scope.slice(0, 80),
-    entity_id: "rate-limit",
-    metadata: { bucket: digest },
+  const { data, error } = await admin.rpc("consume_security_rate_limit", {
+    requested_bucket: digest, maximum_requests: maxRequests, window_seconds: windowSeconds,
   });
-  return !insertError;
+  return !error && data === true;
 }

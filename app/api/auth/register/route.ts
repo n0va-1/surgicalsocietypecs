@@ -22,8 +22,6 @@ export async function POST(request: Request) {
   }
 
   const admin = createSupabaseAdminClient();
-  const { data: existing } = await admin.from("profiles").select("id").eq("email", email).maybeSingle();
-  if (existing) return NextResponse.json({ error: "An account with this email already exists." }, { status: 409 });
   const { data: redemption, error: codeError } = requestedRole === "student"
     ? await admin.rpc("redeem_invite_code", { submitted_code: code, requested_role: "student" })
     : await admin.rpc("redeem_staff_invitation", { requested_email: email });
@@ -43,8 +41,7 @@ export async function POST(request: Request) {
   });
   if (error || !data.user) {
     await admin.rpc("restore_invite_code", { restored_invite_id: invite.invite_id });
-    const duplicate = error?.message.toLowerCase().includes("already") || error?.message.toLowerCase().includes("registered");
-    return NextResponse.json({ error: duplicate ? "An account with this email already exists." : "The account could not be created." }, { status: duplicate ? 409 : 500 });
+    return NextResponse.json({ error: "The account could not be created. Check the details or sign in if you already have an account." }, { status: 400 });
   }
 
   const curriculumEditor = Boolean(invite.curriculum_editor);

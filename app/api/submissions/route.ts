@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedProfile, requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
+import { validateStoredFile } from "@/lib/uploads";
 
 export async function GET() {
   const profile = await getAuthenticatedProfile();
   if (!profile) return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  if (profile.role === "editor") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   const admin = createSupabaseAdminClient();
   let query = admin.from("submissions").select("id,student_id,module_id,object_key,reflection,status,score,outcome,feedback,reviewed_by,reviewed_at,created_at").order("created_at", { ascending: false });
   if (profile.role === "student") query = query.eq("student_id", profile.id);
@@ -16,7 +18,7 @@ export async function GET() {
     query = query.in("student_id", ids);
   }
   const { data, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Submissions could not be loaded." }, { status: 500 });
   const moduleIds = [...new Set((data ?? []).map(item => item.module_id))];
   const studentIds = [...new Set((data ?? []).map(item => item.student_id))];
   const [{ data: modules }, { data: students }] = await Promise.all([
@@ -35,6 +37,15 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as null | { moduleId?: string; objectKey?: string; reflection?: string };
   if (!body?.moduleId || !body.objectKey?.startsWith(`${student.id}/`)) return NextResponse.json({ error: "Invalid submission metadata." }, { status: 400 });
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.from("submissions").insert({ student_id: student.id, module_id: body.moduleId, object_key: body.objectKey, reflection: body.reflection?.trim() || null }).select("id").single();
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ id: data.id }, { status: 201 });
+  if (!await validateStoredFile("submissions", body.objectKey, "image", 10 * 1024 * 1024)) {
+    await admin.storage.from("submissions").remove([body.objectKey]);
+    return NextResponse.json({ error: "The uploaded file is not a valid supported image." }, { status: 400 });
+  }
+  const { data: module } = await admin.from("modules").select("id,level,published").eq("id", body.moduleId).maybeSingle();
+  if (!module?.published || module.level !== student.rank) {
+    await admin.storage.from("submissions").remove([body.objectKey]);
+    return NextResponse.json({ error: "This module is not available for submission." }, { status: 403 });
+  }
+  const { data, error } = await admin.from("submissions").insert({ student_id: student.id, module_id: body.moduleId, object_key: body.objectKey, reflection: body.reflection?.trim().slice(0, 2000) || null }).select("id").single();
+  return error ? NextResponse.json({ error: "The submission could not be saved." }, { status: 500 }) : NextResponse.json({ id: data.id }, { status: 201 });
 }

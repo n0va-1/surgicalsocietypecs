@@ -17,3 +17,5 @@ The application code is connected to the Vercel-managed Supabase project. Vercel
 Before publishing, set the Supabase **Site URL** and **Redirect URLs** to the final Vercel domain. Enable MFA for the administrator and demonstrators. A custom SMTP provider is optional for the first demonstration but recommended before real student onboarding.
 
 Never place `SUPABASE_SECRET_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, database passwords, or Postgres URLs in browser code. They are used only by server routes in this project.
+
+The production deployment also requires a strong random `CRON_SECRET`. Vercel sends it as a bearer token when invoking the daily six-month retention job. Mark `CRON_SECRET`, `SUPABASE_SECRET_KEY`, `RESEND_API_KEY`, and database credentials as sensitive environment variables and never prefix them with `NEXT_PUBLIC_`.

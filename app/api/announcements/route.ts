@@ -14,7 +14,7 @@ export async function GET() {
     admin.from("audit_logs").select("entity_id").eq("actor_id", profile.id).eq("action", "announcement.read"),
   ]);
   const readIds = new Set((reads ?? []).map(item => item.entity_id));
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ announcements: (data ?? []).map(item => ({ ...item, read: readIds.has(item.id) })) }, { headers: { "Cache-Control": "no-store" } });
+  return error ? NextResponse.json({ error: "Announcements could not be loaded." }, { status: 500 }) : NextResponse.json({ announcements: (data ?? []).map(item => ({ ...item, read: readIds.has(item.id) })) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
@@ -32,12 +32,14 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as null | { title?: string; titleHu?: string; message?: string; messageHu?: string; target?: string; pinned?: boolean };
   const targets = ["everyone", "beginner", "intermediate", "advanced"];
   const target = body?.target?.toLowerCase() ?? "everyone";
-  if (!body?.title?.trim() || !body.message?.trim() || !targets.includes(target)) return NextResponse.json({ error: "Title, message and a valid target are required." }, { status: 400 });
+  const title = body?.title?.trim().slice(0, 180);
+  const message = body?.message?.trim().slice(0, 5000);
+  if (!title || !message || !targets.includes(target)) return NextResponse.json({ error: "Title, message and a valid target are required." }, { status: 400 });
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("announcements").insert({
-    author_id: staff.id, title_en: body.title.trim(), title_hu: body.titleHu?.trim() || null,
-    body_en: body.message.trim(), body_hu: body.messageHu?.trim() || null, target_level: target, pinned: Boolean(body.pinned), is_demo: staff.is_demo,
+    author_id: staff.id, title_en: title, title_hu: body?.titleHu?.trim().slice(0, 180) || null,
+    body_en: message, body_hu: body?.messageHu?.trim().slice(0, 5000) || null, target_level: target, pinned: Boolean(body?.pinned), is_demo: staff.is_demo,
   }).select("id").single();
   if (!error && data) await admin.from("audit_logs").insert({ actor_id: staff.id, action: "announcement.published", entity_type: "announcement", entity_id: data.id, metadata: { target } });
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ id: data.id }, { status: 201 });
+  return error ? NextResponse.json({ error: "The announcement could not be published." }, { status: 500 }) : NextResponse.json({ id: data.id }, { status: 201 });
 }

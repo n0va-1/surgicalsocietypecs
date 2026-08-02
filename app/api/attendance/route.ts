@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   let sessionQuery = admin.from("course_sessions").select("id,title,level,starts_at,created_at,semester_key,session_number,is_demo").eq("semester_key", DEFAULT_SEMESTER).order("session_number", { ascending: true }).limit(10);
   sessionQuery = sessionQuery.eq("is_demo", staff.is_demo);
   const { data: sessions, error } = await sessionQuery;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Attendance could not be loaded." }, { status: 500 });
   const sessionId = requestedSessionId && sessions?.some(session => session.id === requestedSessionId)
     ? requestedSessionId
     : sessions?.at(-1)?.id;
@@ -80,7 +80,7 @@ export async function PUT(request: Request) {
       is_demo: staff.is_demo,
       created_by: staff.id,
     }).select("id").single();
-    if (error || !session) return NextResponse.json({ error: error?.message ?? "Session could not be created." }, { status: 500 });
+    if (error || !session) return NextResponse.json({ error: "Session could not be created." }, { status: 500 });
     sessionId = session.id;
   }
 
@@ -89,7 +89,7 @@ export async function PUT(request: Request) {
     recorded_by: staff.id, recorded_at: new Date().toISOString(), correction_note: item.correctionNote?.trim() || null,
   }));
   const { error } = await admin.from("attendance_records").upsert(rows, { onConflict: "session_id,student_id" });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: "Attendance could not be saved." }, { status: 500 });
 
   let relevantSessionsQuery = admin.from("course_sessions").select("id").eq("semester_key", semesterKey);
   relevantSessionsQuery = relevantSessionsQuery.eq("is_demo", staff.is_demo);

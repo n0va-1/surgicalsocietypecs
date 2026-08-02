@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isSameOriginRequest } from "@/lib/security";
+import { validateStoredFile } from "@/lib/uploads";
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
@@ -15,6 +16,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid curriculum asset." }, { status: 400 });
   }
   const admin = createSupabaseAdminClient();
+  const kind = body.kind === "video" ? "video" : "image";
+  if (!await validateStoredFile("curriculum", objectKey, kind, 50 * 1024 * 1024)) {
+    await admin.storage.from("curriculum").remove([objectKey]);
+    return NextResponse.json({ error: `The uploaded file is not a valid supported ${kind}.` }, { status: 400 });
+  }
   const { data: module } = await admin.from("modules").select("id").eq("id", body.moduleId).maybeSingle();
   if (!module) return NextResponse.json({ error: "Chapter not found." }, { status: 404 });
   const { data, error } = await admin.from("module_assets").insert({ module_id: body.moduleId, uploader_id: profile.id, kind: body.kind, object_key: objectKey, caption }).select("id").single();

@@ -2,24 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
-}
-
-test("server-renders the Surgical Society Skills Academy", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
+test("builds the Surgical Society Skills Academy homepage", async () => {
+  const html = await readFile(new URL("../.next/server/app/index.html", import.meta.url), "utf8");
   assert.match(html, /<title>Surgical Society Pécs · Skills Academy<\/title>/i);
   assert.match(html, /Welcome to the Surgical Society\./);
   assert.match(html, /Practice with us and become better bit by bit\./);
@@ -51,13 +35,13 @@ test("ships the bilingual role-gated interactive prototype", async () => {
   assert.match(page, /Add a profile picture/);
   assert.match(page, /\/api\/announcements\/read/);
   assert.doesNotMatch(page, /localStorage|sessionStorage/);
-  assert.match(page, /Staff security verification/);
+  assert.match(page, /Secure staff sign-in/);
   assert.match(page, /Choose an emoji profile picture/);
   assert.match(page, /total-overview/);
   assert.doesNotMatch(page, /University of Pécs|Medical School/);
   assert.match(page, /function AdminPage/);
-  assert.match(page, /data-testid="admin-code-input"/);
-  assert.match(page, /\^\\d\{6,\}\$/);
+  assert.match(page, /Exact approved email address/);
+  assert.match(page, /Your student event code/);
   assert.match(layout, /Surgical Society Pécs · Skills Academy/);
   assert.match(layout, /icon: "\/ssp-logo.png"/);
   assert.match(css, /data-theme="dark"/);

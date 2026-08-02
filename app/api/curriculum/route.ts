@@ -27,6 +27,17 @@ function cleanText(value: unknown, max = 8000) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function cleanExternalUrl(value: unknown) {
+  const candidate = cleanText(value, 1000);
+  if (!candidate) return null;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   const profile = await requireRole(["student", "demonstrator", "admin", "editor"]);
   if (!profile) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -68,7 +79,7 @@ export async function POST(request: Request) {
     equipment_en: cleanText(body?.equipment_en, 3000), equipment_hu: cleanText(body?.equipment_hu, 3000),
     steps_en: Array.isArray(body?.steps_en) ? body.steps_en.map(step => cleanText(step, 1000)).filter(Boolean).slice(0, 30) : [],
     steps_hu: Array.isArray(body?.steps_hu) ? body.steps_hu.map(step => cleanText(step, 1000)).filter(Boolean).slice(0, 30) : [],
-    video_url: cleanText(body?.video_url, 1000) || null, published, updated_at: new Date().toISOString(),
+    video_url: cleanExternalUrl(body?.video_url), published, updated_at: new Date().toISOString(),
   };
   const admin = createSupabaseAdminClient();
   if (body?.id && profile.role === "editor") {

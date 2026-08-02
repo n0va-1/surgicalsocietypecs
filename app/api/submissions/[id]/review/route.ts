@@ -24,5 +24,5 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
   const status = body?.outcome === "all_done" ? "reviewed" : "resubmit";
   const { error } = await admin.from("submissions").update({ score: body?.score, outcome: body?.outcome, feedback: body?.feedback?.trim() || null, status, reviewed_by: staff.id, reviewed_at: new Date().toISOString() }).eq("id", id);
   if (!error) await admin.from("audit_logs").insert({ actor_id: staff.id, action: "submission.reviewed", entity_type: "submission", entity_id: id, metadata: { score: body?.score, outcome: body?.outcome } });
-  return error ? NextResponse.json({ error: error.message }, { status: 500 }) : NextResponse.json({ ok: true });
+  return error ? NextResponse.json({ error: "The review could not be saved." }, { status: 500 }) : NextResponse.json({ ok: true });
 }
