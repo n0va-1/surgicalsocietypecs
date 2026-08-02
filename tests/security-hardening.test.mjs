@@ -26,9 +26,12 @@ test("emails the report before deleting retained photographs", async () => {
 
 test("uses a nonce-based script policy and atomic database rate limits", async () => {
   const proxy = await read("proxy.ts");
+  const layout = await read("app/layout.tsx");
   const security = await read("lib/security.ts");
   assert.match(proxy, /script-src 'self' 'nonce-\$\{nonce\}' 'strict-dynamic'/);
   assert.doesNotMatch(proxy, /script-src[^\n]*unsafe-inline/);
+  assert.match(layout, /import \{ connection \} from "next\/server"/);
+  assert.match(layout, /await connection\(\)/);
   assert.match(security, /consume_security_rate_limit/);
 });
 

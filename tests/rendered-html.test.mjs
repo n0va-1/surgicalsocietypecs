@@ -3,13 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("builds the Surgical Society Skills Academy homepage", async () => {
-  const html = await readFile(new URL("../.next/server/app/index.html", import.meta.url), "utf8");
-  assert.match(html, /<title>Surgical Society Pécs · Skills Academy<\/title>/i);
-  assert.match(html, /Welcome to the Surgical Society\./);
-  assert.match(html, /Practice with us and become better bit by bit\./);
-  assert.match(html, /Welcome back/);
-  assert.match(html, /Choose your area/);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape/);
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
+  assert.match(layout, /title: "Surgical Society Pécs · Skills Academy"/i);
+  assert.match(page, /Welcome to the Surgical Society\./);
+  assert.match(page, /Practice with us and become better bit by bit\./);
+  assert.match(page, /Welcome back/);
+  assert.match(page, /Choose your area/);
+  assert.doesNotMatch(page, /codex-preview|Your site is taking shape/);
 });
 
 test("ships the bilingual role-gated interactive prototype", async () => {
