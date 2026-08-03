@@ -23,7 +23,7 @@ test("registration confirmation returns to the live academy instead of localhost
   assert.match(registration, /emailRedirectTo: `\$\{getSiteUrl\(request\)\}\/\?emailConfirmed=1`/);
   assert.match(resend, /auth\.resend/);
   assert.match(resend, /consumeRateLimit\(request, "confirmation-resend", 3, 3600\)/);
-  assert.match(siteUrl, /https:\/\/ligatura-ke8\.vercel\.app/);
+  assert.match(siteUrl, /https:\/\/ligatura-surgical-society-pecs\.vercel\.app/);
   assert.match(homepage, /Your email address is confirmed\. You can now sign in\./);
   assert.match(homepage, /Resend confirmation email/);
 });

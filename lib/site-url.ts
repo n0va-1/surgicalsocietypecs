@@ -1,4 +1,4 @@
-const productionSiteUrl = "https://ligatura-ke8.vercel.app";
+const productionSiteUrl = "https://ligatura-surgical-society-pecs.vercel.app";
 
 function normalizeSiteUrl(value: string) {
   const withProtocol = value.startsWith("http://") || value.startsWith("https://") ? value : `https://${value}`;
