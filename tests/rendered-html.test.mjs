@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("builds the Surgical Society Skills Academy homepage", async () => {
+test("builds the Ligatura homepage for Surgical Society Pécs", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const layout = await readFile(new URL("../app/layout.tsx", import.meta.url), "utf8");
-  assert.match(layout, /title: "Surgical Society Pécs · Skills Academy"/i);
+  assert.match(layout, /title: "Ligatura · Surgical Society Pécs"/i);
   assert.match(page, /Welcome to the Surgical Society\./);
   assert.match(page, /Practice with us and become better bit by bit\./);
   assert.match(page, /Welcome back/);
@@ -43,7 +43,7 @@ test("ships the bilingual role-gated interactive prototype", async () => {
   assert.match(page, /function AdminPage/);
   assert.match(page, /Exact approved email address/);
   assert.match(page, /Your student event code/);
-  assert.match(layout, /Surgical Society Pécs · Skills Academy/);
+  assert.match(layout, /Ligatura · Surgical Society Pécs/);
   assert.match(layout, /icon: "\/ssp-logo.png"/);
   assert.match(css, /data-theme="dark"/);
   assert.match(css, /@media \(max-width:720px\)/);

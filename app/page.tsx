@@ -24,7 +24,7 @@ type SystemStatus = { database: boolean; email: boolean; sender: boolean; retent
 const ui = {
   en: {
     society: "Surgical Society",
-    academy: "Pécs · Skills Academy",
+    academy: "Ligatura",
     authEyebrow: "SURGICAL SOCIETY PÉCS",
     authTitle: "Welcome to the Surgical Society.",
     authIntro: "Practice with us and become better bit by bit.",
@@ -109,7 +109,7 @@ const ui = {
   },
   hu: {
     society: "Sebészeti Társaság",
-    academy: "Pécs · Készségakadémia",
+    academy: "Ligatura",
     authEyebrow: "PÉCSI SEBÉSZETI TÁRSASÁG",
     authTitle: "Üdvözlünk a Sebészeti Társaságban.",
     authIntro: "Gyakorolj velünk, és fejlődj lépésről lépésre.",
@@ -341,7 +341,7 @@ export default function Home() {
       setMfaQrCode("");
       setMfaSecret("");
     } else {
-      const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Surgical Society Pécs staff" });
+      const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Ligatura staff" });
       if (error) throw error;
       setMfaMode("enroll"); setMfaFactors([]);
       setMfaFactorId(data.id);
@@ -357,7 +357,7 @@ export default function Home() {
       const currentRole: PortalProfile["role"] = isAdmin ? "admin" : isCurriculumEditor ? "editor" : "demonstrator";
       const profile: PortalProfile = { id: accountId, role: currentRole, full_name: accountName, email: accountEmail, avatarUrl: accountAvatarUrl, avatar_emoji: accountAvatarEmoji };
       const supabase = getSupabaseBrowserClient();
-      const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Surgical Society Pécs backup" });
+      const { data, error } = await supabase.auth.mfa.enroll({ factorType: "totp", friendlyName: "Ligatura backup" });
       if (error) throw error;
       setPendingProfile(profile); setMfaMode("enroll"); setMfaFactors([]); setMfaFactorId(data.id); setMfaQrCode(data.totp.qr_code); setMfaSecret(data.totp.secret); setMfaCode(""); setModal("mfa");
     } catch { setToast("A backup authenticator could not be started."); }
@@ -704,7 +704,7 @@ export default function Home() {
       <section className="auth-intro">
         <div className="auth-brand"><Logo login /><div><strong>{t.society}</strong><span>{t.academy}</span></div></div>
         <div className="auth-message"><span className="eyebrow">{t.authEyebrow}</span><h1>{t.authTitle}</h1><p>{t.authIntro}</p></div>
-        <div className="auth-proof"><article><span>○</span><div><strong>{t.privateTitle}</strong><p>{t.privateText}</p></div></article><article><span>HU</span><div><strong>English · Magyar</strong><p>One academy, available in both languages.</p></div></article></div>
+        <div className="auth-proof"><article><span>○</span><div><strong>{t.privateTitle}</strong><p>{t.privateText}</p></div></article><article><span>HU</span><div><strong>English · Magyar</strong><p>Ligatura is available in both languages.</p></div></article></div>
         <p className="auth-university">Surgical Society Pécs · Independent skills community</p>
       </section>
       <section className="auth-panel">

@@ -3,8 +3,8 @@ import { connection } from "next/server";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Surgical Society Pécs · Skills Academy",
-  description: "A bilingual learning and progress platform for surgical skills students and demonstrators.",
+  title: "Ligatura · Surgical Society Pécs",
+  description: "Ligatura is the bilingual learning and progress platform of Surgical Society Pécs.",
   icons: {
     icon: "/ssp-logo.png",
     shortcut: "/ssp-logo.png",

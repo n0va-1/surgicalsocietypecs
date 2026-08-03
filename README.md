@@ -1,6 +1,6 @@
-# Surgical Society Pécs · Skills Academy
+# Ligatura · Surgical Society Pécs
 
-A bilingual private learning platform for students, demonstrators and one administrator. The application uses Next.js on Vercel and Supabase for password authentication, Postgres data and private submission-photo storage.
+Ligatura is the bilingual private learning platform of Surgical Society Pécs for students, demonstrators and one administrator. The application uses Next.js on Vercel and Supabase for password authentication, Postgres data and private submission-photo storage.
 
 ## Prerequisites
 
