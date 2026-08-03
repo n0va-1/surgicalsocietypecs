@@ -34,9 +34,13 @@ export async function POST(request: Request) {
   const student = await requireRole(["student"]);
   if (!student || !student.eligible) return NextResponse.json({ error: student ? "Attendance eligibility is required." : "Forbidden" }, { status: 403 });
   if (!await consumeRateLimit(request, `submission:${student.id}`, 12, 3600)) return NextResponse.json({ error: "Submission limit reached. Please try again later." }, { status: 429 });
-  const body = await request.json().catch(() => null) as null | { moduleId?: string; objectKey?: string; reflection?: string };
+  const body = await request.json().catch(() => null) as null | { moduleId?: string; objectKey?: string; reflection?: string; authenticityConfirmed?: boolean };
   if (!body?.moduleId || !body.objectKey?.startsWith(`${student.id}/`)) return NextResponse.json({ error: "Invalid submission metadata." }, { status: 400 });
   const admin = createSupabaseAdminClient();
+  if (body.authenticityConfirmed !== true) {
+    await admin.storage.from("submissions").remove([body.objectKey]);
+    return NextResponse.json({ error: "Confirm that this is a genuine photograph of your own practice work." }, { status: 400 });
+  }
   if (!await validateStoredFile("submissions", body.objectKey, "image", 10 * 1024 * 1024)) {
     await admin.storage.from("submissions").remove([body.objectKey]);
     return NextResponse.json({ error: "The uploaded file is not a valid supported image." }, { status: 400 });
@@ -46,6 +50,11 @@ export async function POST(request: Request) {
     await admin.storage.from("submissions").remove([body.objectKey]);
     return NextResponse.json({ error: "This module is not available for submission." }, { status: 403 });
   }
-  const { data, error } = await admin.from("submissions").insert({ student_id: student.id, module_id: body.moduleId, object_key: body.objectKey, reflection: body.reflection?.trim().slice(0, 2000) || null }).select("id").single();
-  return error ? NextResponse.json({ error: "The submission could not be saved." }, { status: 500 }) : NextResponse.json({ id: data.id }, { status: 201 });
+  const { data, error } = await admin.from("submissions").insert({ student_id: student.id, module_id: body.moduleId, object_key: body.objectKey, reflection: body.reflection?.trim().slice(0, 2000) || null, authenticity_confirmed: true }).select("id").single();
+  if (error) {
+    await admin.storage.from("submissions").remove([body.objectKey]);
+    return NextResponse.json({ error: "The submission could not be saved." }, { status: 500 });
+  }
+  await admin.from("audit_logs").insert({ actor_id: student.id, action: "submission.authenticity_confirmed", entity_type: "submission", entity_id: data.id, metadata: { module_id: body.moduleId } });
+  return NextResponse.json({ id: data.id }, { status: 201 });
 }

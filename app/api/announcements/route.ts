@@ -10,7 +10,7 @@ export async function GET() {
   const supabase = await createSupabaseServerClient();
   const admin = createSupabaseAdminClient();
   const [{ data, error }, { data: reads }] = await Promise.all([
-    supabase.from("announcements").select("id,title_en,title_hu,body_en,body_hu,target_level,pinned,published_at,is_demo").eq("is_demo", profile.is_demo).order("pinned", { ascending: false }).order("published_at", { ascending: false }).limit(50),
+    supabase.from("announcements").select("id,title_en,title_hu,body_en,body_hu,target_level,pinned,published_at,is_demo,content_origin,editorial_review_confirmed").eq("is_demo", profile.is_demo).order("pinned", { ascending: false }).order("published_at", { ascending: false }).limit(50),
     admin.from("audit_logs").select("entity_id").eq("actor_id", profile.id).eq("action", "announcement.read"),
   ]);
   const readIds = new Set((reads ?? []).map(item => item.entity_id));
@@ -29,17 +29,21 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please verify your authenticator before publishing an announcement." }, { status: 403 });
   }
   if (!await consumeRateLimit(request, `announcement:${staff.id}`, 20, 3600)) return NextResponse.json({ error: "Announcement limit reached. Please try again later." }, { status: 429 });
-  const body = await request.json().catch(() => null) as null | { title?: string; titleHu?: string; message?: string; messageHu?: string; target?: string; pinned?: boolean };
+  const body = await request.json().catch(() => null) as null | { title?: string; titleHu?: string; message?: string; messageHu?: string; target?: string; pinned?: boolean; contentOrigin?: "human" | "ai_assisted" | "ai_generated"; editorialReviewConfirmed?: boolean };
   const targets = ["everyone", "beginner", "intermediate", "advanced"];
   const target = body?.target?.toLowerCase() ?? "everyone";
   const title = body?.title?.trim().slice(0, 180);
   const message = body?.message?.trim().slice(0, 5000);
+  const contentOrigin = body?.contentOrigin ?? "human";
   if (!title || !message || !targets.includes(target)) return NextResponse.json({ error: "Title, message and a valid target are required." }, { status: 400 });
+  if (!["human", "ai_assisted", "ai_generated"].includes(contentOrigin)) return NextResponse.json({ error: "A valid content origin is required." }, { status: 400 });
+  if (body?.editorialReviewConfirmed !== true) return NextResponse.json({ error: "Confirm human editorial responsibility before publishing." }, { status: 400 });
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("announcements").insert({
     author_id: staff.id, title_en: title, title_hu: body?.titleHu?.trim().slice(0, 180) || null,
     body_en: message, body_hu: body?.messageHu?.trim().slice(0, 5000) || null, target_level: target, pinned: Boolean(body?.pinned), is_demo: staff.is_demo,
+    content_origin: contentOrigin, editorial_review_confirmed: true,
   }).select("id").single();
-  if (!error && data) await admin.from("audit_logs").insert({ actor_id: staff.id, action: "announcement.published", entity_type: "announcement", entity_id: data.id, metadata: { target } });
+  if (!error && data) await admin.from("audit_logs").insert({ actor_id: staff.id, action: "announcement.published", entity_type: "announcement", entity_id: data.id, metadata: { target, content_origin: contentOrigin, editorial_review_confirmed: true } });
   return error ? NextResponse.json({ error: "The announcement could not be published." }, { status: 500 }) : NextResponse.json({ id: data.id }, { status: 201 });
 }

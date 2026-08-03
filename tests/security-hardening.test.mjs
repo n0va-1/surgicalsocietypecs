@@ -45,3 +45,23 @@ test("does not return raw database error messages from API routes", async () => 
   ].map(read));
   for (const route of routes) assert.doesNotMatch(route, /error\??\.message/);
 });
+
+test("enforces AI transparency, editorial review, consent and genuine student work", async () => {
+  const migration = await read("supabase/migrations/202608030001_ai_transparency.sql");
+  const curriculum = await read("app/api/curriculum/route.ts");
+  const assets = await read("app/api/curriculum/assets/route.ts");
+  const announcements = await read("app/api/announcements/route.ts");
+  const submissions = await read("app/api/submissions/route.ts");
+  const page = await read("app/page.tsx");
+
+  assert.match(migration, /modules_publication_review_check/);
+  assert.match(migration, /authenticity_confirmed = true/);
+  assert.match(migration, /module_assets_likeness_consent_check/);
+  assert.match(curriculum, /Complete the human medical and editorial review before publishing/);
+  assert.match(assets, /Consent must be confirmed for media depicting a recognisable person/);
+  assert.match(announcements, /Confirm human editorial responsibility before publishing/);
+  assert.match(submissions, /authenticity_confirmed: true/);
+  assert.match(page, /Genuine-work confirmation/);
+  assert.match(page, /AI-generated or materially AI-altered content · human reviewed/);
+  assert.match(page, /Ligatura does not currently use AI to assess students/);
+});

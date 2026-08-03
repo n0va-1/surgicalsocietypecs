@@ -20,6 +20,8 @@ type CurriculumBody = {
   steps_en?: string[];
   steps_hu?: string[];
   video_url?: string;
+  content_origin?: "human" | "ai_assisted" | "ai_generated";
+  editorial_review_confirmed?: boolean;
   published?: boolean;
 };
 
@@ -47,14 +49,19 @@ export async function GET() {
   const { data: modules, error } = await query;
   if (error) return NextResponse.json({ error: "Curriculum could not be loaded." }, { status: 500 });
   const moduleIds = (modules ?? []).map(module => module.id);
-  const { data: assets } = moduleIds.length
-    ? await admin.from("module_assets").select("id,module_id,kind,object_key,caption,created_at").in("module_id", moduleIds).order("created_at")
-    : { data: [] };
+  const reviewerIds = [...new Set((modules ?? []).flatMap(module => module.reviewed_by ? [module.reviewed_by] : []))];
+  const assetsRequest = moduleIds.length
+    ? admin.from("module_assets").select("id,module_id,kind,object_key,caption,content_origin,depicts_identifiable_person,likeness_consent_confirmed,created_at").in("module_id", moduleIds).order("created_at")
+    : Promise.resolve({ data: [] });
+  const reviewersRequest = reviewerIds.length
+    ? admin.from("profiles").select("id,full_name").in("id", reviewerIds)
+    : Promise.resolve({ data: [] });
+  const [{ data: assets }, { data: reviewers }] = await Promise.all([assetsRequest, reviewersRequest]);
   const signedAssets = await Promise.all((assets ?? []).map(async asset => {
     const { data } = await admin.storage.from("curriculum").createSignedUrl(asset.object_key, 3600);
     return { ...asset, url: data?.signedUrl ?? null };
   }));
-  return NextResponse.json({ modules: (modules ?? []).map(module => ({ ...module, assets: signedAssets.filter(asset => asset.module_id === module.id) })) }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ modules: (modules ?? []).map(module => ({ ...module, reviewer_name: reviewers?.find(reviewer => reviewer.id === module.reviewed_by)?.full_name ?? null, assets: signedAssets.filter(asset => asset.module_id === module.id) })) }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(request: Request) {
@@ -67,10 +74,14 @@ export async function POST(request: Request) {
   const week = Number(body?.week);
   const titleEn = cleanText(body?.title_en, 180);
   const titleHu = cleanText(body?.title_hu, 180);
+  const contentOrigin = body?.content_origin ?? "human";
   if (!level || !["beginner", "intermediate", "advanced"].includes(level) || !Number.isInteger(week) || week < 1 || week > 30 || !titleEn || !titleHu) {
     return NextResponse.json({ error: "Level, week and both chapter titles are required." }, { status: 400 });
   }
+  if (!["human", "ai_assisted", "ai_generated"].includes(contentOrigin)) return NextResponse.json({ error: "A valid content origin is required." }, { status: 400 });
   const published = profile.role === "admin" && body?.published === true;
+  const editorialReviewConfirmed = profile.role === "admin" && body?.editorial_review_confirmed === true;
+  if (published && !editorialReviewConfirmed) return NextResponse.json({ error: "Complete the human medical and editorial review before publishing." }, { status: 400 });
   const record = {
     level, week, title_en: titleEn, title_hu: titleHu,
     introduction_en: cleanText(body?.introduction_en), introduction_hu: cleanText(body?.introduction_hu),
@@ -79,7 +90,11 @@ export async function POST(request: Request) {
     equipment_en: cleanText(body?.equipment_en, 3000), equipment_hu: cleanText(body?.equipment_hu, 3000),
     steps_en: Array.isArray(body?.steps_en) ? body.steps_en.map(step => cleanText(step, 1000)).filter(Boolean).slice(0, 30) : [],
     steps_hu: Array.isArray(body?.steps_hu) ? body.steps_hu.map(step => cleanText(step, 1000)).filter(Boolean).slice(0, 30) : [],
-    video_url: cleanExternalUrl(body?.video_url), published, updated_at: new Date().toISOString(),
+    video_url: cleanExternalUrl(body?.video_url), content_origin: contentOrigin, published,
+    editorial_review_confirmed: editorialReviewConfirmed,
+    reviewed_by: editorialReviewConfirmed ? profile.id : null,
+    reviewed_at: editorialReviewConfirmed ? new Date().toISOString() : null,
+    updated_at: new Date().toISOString(),
   };
   const admin = createSupabaseAdminClient();
   if (body?.id && profile.role === "editor") {
@@ -91,6 +106,6 @@ export async function POST(request: Request) {
     : admin.from("modules").insert(record).select("id").single();
   const { data, error } = await operation;
   if (error) return NextResponse.json({ error: error.code === "23505" ? "A chapter already uses that level and week." : "The chapter could not be saved." }, { status: 400 });
-  await admin.from("audit_logs").insert({ actor_id: profile.id, action: body?.id ? "curriculum.updated" : "curriculum.created", entity_type: "module", entity_id: data.id, metadata: { published } });
+  await admin.from("audit_logs").insert({ actor_id: profile.id, action: body?.id ? "curriculum.updated" : "curriculum.created", entity_type: "module", entity_id: data.id, metadata: { published, content_origin: contentOrigin, editorial_review_confirmed: editorialReviewConfirmed } });
   return NextResponse.json({ id: data.id, published }, { status: body?.id ? 200 : 201 });
 }
