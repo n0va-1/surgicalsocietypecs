@@ -235,7 +235,8 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 .form-field input:focus { border-color:var(--burgundy); box-shadow:0 0 0 2px color-mix(in srgb,var(--burgundy) 10%,transparent); }
 .form-field input::placeholder { color:color-mix(in srgb,var(--muted) 65%,transparent); }
 .code-field > small { display:block; margin-top:6px; color:var(--muted); font-size:8px; line-height:1.45; }
-.forgot-link { display:block; margin:-4px 0 17px auto; border:0; background:transparent; color:var(--burgundy); font-size:9px; cursor:pointer; }
+.auth-help-links { display:flex; justify-content:flex-end; flex-wrap:wrap; gap:6px 14px; margin:-4px 0 17px; }
+.forgot-link { display:block; margin:0; border:0; background:transparent; color:var(--burgundy); font-size:9px; cursor:pointer; }
 .auth-submit { width:100%; min-height:47px; padding:0 17px; border:1px solid var(--burgundy); border-radius:4px; background:var(--burgundy); color:#fff; font-size:10px; cursor:pointer; text-align:left; }
 .auth-submit:hover { background:var(--burgundy-deep); }
 .auth-submit span { float:right; }

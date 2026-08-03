@@ -9,7 +9,7 @@ type Role = "student" | "staff";
 type AuthMode = "login" | "register";
 type StudentPage = "overview" | "learning" | "submissions" | "achievements" | "announcements" | "profile";
 type StaffPage = "overview" | "students" | "attendance" | "reviews" | "announcements" | "reports" | "curriculum" | "admin" | "profile";
-type Modal = "upload" | "lesson" | "feedback" | "forgot" | "notifications" | "certificate" | "review" | "announcement" | "student" | "privacy" | "mfa" | null;
+type Modal = "upload" | "lesson" | "feedback" | "forgot" | "confirmation" | "notifications" | "certificate" | "review" | "announcement" | "student" | "privacy" | "mfa" | null;
 type StudentRow = [name: string, initials: string, level: string, progress: string, technique: string, id?: string, absences?: number, eligible?: boolean, avatarUrl?: string, avatarEmoji?: string];
 type AnnouncementRow = { id?: string; date: string; title: string; hu: string; text: string; target: string; pinned: boolean; publishedAt?: string };
 type SubmissionRow = { id: string; student_id: string; module_id: string; object_key: string; reflection: string | null; status: string; score: number | null; outcome: string | null; feedback: string | null; created_at: string; module: { id: string; title_en: string; title_hu: string; week: number; level: string } | null; student: { id: string; full_name: string; rank: string } | null };
@@ -48,6 +48,7 @@ const ui = {
     eventCode: "Event or invitation code",
     staffCode: "Staff invitation code",
     forgot: "Forgot password?",
+    resendConfirmation: "Resend confirmation email",
     loginStudent: "Enter student academy",
     loginStaff: "Enter staff desk",
     createStudent: "Create student account",
@@ -132,6 +133,7 @@ const ui = {
     eventCode: "Esemény- vagy meghívókód",
     staffCode: "Oktatói meghívókód",
     forgot: "Elfelejtetted a jelszavad?",
+    resendConfirmation: "Megerősítő e-mail újraküldése",
     loginStudent: "Belépés a hallgatói akadémiára",
     loginStaff: "Belépés az oktatói felületre",
     createStudent: "Hallgatói fiók létrehozása",
@@ -500,8 +502,12 @@ export default function Home() {
   }, [authenticated, isLocalPreview, refreshPortalData]);
 
   useEffect(() => {
-    if (new URLSearchParams(location.search).get("passwordUpdated") === "1") {
+    const params = new URLSearchParams(location.search);
+    if (params.get("passwordUpdated") === "1") {
       queueMicrotask(() => setToast("Your password was changed. Sign in with the new password."));
+      history.replaceState({}, "", "/");
+    } else if (params.get("emailConfirmed") === "1") {
+      queueMicrotask(() => setToast("Your email address is confirmed. You can now sign in."));
       history.replaceState({}, "", "/");
     }
   }, []);
@@ -585,6 +591,18 @@ export default function Home() {
     const email = String(new FormData(event.currentTarget).get("resetEmail") ?? "");
     const { error } = await getSupabaseBrowserClient().auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/auth/callback?next=/reset-password` });
     completeAction(error ? "The reset email could not be sent." : "If that account exists, a secure reset link has been sent.");
+  }
+
+  async function resendConfirmation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const email = String(new FormData(event.currentTarget).get("confirmationEmail") ?? "");
+    const response = await fetch("/api/auth/resend-confirmation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const result = await response.json().catch(() => ({}));
+    completeAction(response.ok ? result.message : result.error ?? "The confirmation email could not be sent.");
   }
 
   function completeAction(message: string) {
@@ -705,7 +723,7 @@ export default function Home() {
             {authMode === "register" && role === "student" && <label className="form-field code-field"><span>{t.accessCode}</span><input type="text" value={authCode} onChange={event => setAuthCode(event.target.value.toUpperCase())} minLength={6} placeholder={t.eventCode} required /><small>Use the student code provided at the sign-up event.</small></label>}
             {authMode === "register" && role === "staff" && <div className="staff-approval-note"><span>✓</span><p>Your exact email address must already be approved by the administrator. No staff code is required.</p></div>}
             {authMode === "register" && <label className="consent-row"><input name="privacyAccepted" type="checkbox" required /><span>I have read the <button type="button" onClick={() => setModal("privacy")}>privacy notice</button> and will upload only personal, non-clinical practice images with no patient information.</span></label>}
-            {authMode === "login" && <button className="forgot-link" type="button" onClick={() => setModal("forgot")}>{t.forgot}</button>}
+            {authMode === "login" && <div className="auth-help-links"><button className="forgot-link" type="button" onClick={() => setModal("confirmation")}>{t.resendConfirmation}</button><button className="forgot-link" type="button" onClick={() => setModal("forgot")}>{t.forgot}</button></div>}
             <button data-testid="auth-submit" className="auth-submit" type="submit" disabled={authBusy}>{authBusy ? "Please wait…" : authMode === "login" ? (role === "student" ? t.loginStudent : t.loginStaff) : (role === "student" ? t.createStudent : t.createStaff)} <span>→</span></button>
             {process.env.NODE_ENV === "development" && <button className="local-preview-button" type="button" onClick={enterLocalPreview}>Preview selected area · local only</button>}
             <p className="access-note">◇ {t.areaPrivacy}</p>
@@ -714,6 +732,7 @@ export default function Home() {
         </div>
       </section>
       {modal === "forgot" && <ModalShell title="Reset your password" onClose={() => setModal(null)}><form onSubmit={sendPasswordReset}><p className="modal-copy">Enter your account email. A secure reset link will be sent if the address belongs to an account.</p><label className="form-field"><span>{t.email}</span><input name="resetEmail" type="email" required placeholder="anna.nagy@example.com" /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" type="submit">Send reset link</button></div></form></ModalShell>}
+      {modal === "confirmation" && <ModalShell title="Confirm your email" onClose={() => setModal(null)}><form onSubmit={resendConfirmation}><p className="modal-copy">Enter the email address you registered with. If it still needs confirmation, we will send a new secure link.</p><label className="form-field"><span>{t.email}</span><input name="confirmationEmail" type="email" required placeholder="anna.nagy@example.com" /></label><div className="modal-actions"><button className="secondary-button" type="button" onClick={() => setModal(null)}>{t.cancel}</button><button className="primary-button" type="submit">Send confirmation</button></div></form></ModalShell>}
       {modal === "mfa" && <ModalShell title="Secure staff sign-in" onClose={() => void signOut()}><form className="mfa-form" onSubmit={verifyMfa}>{mfaMode === "enroll" ? <><p className="modal-copy">This one-time setup protects student information. It usually takes less than a minute.</p><ol className="mfa-steps"><li><b>1</b><span>Open Google Authenticator, Microsoft Authenticator, 1Password or Apple Passwords on your phone.</span></li><li><b>2</b><span>Press <strong>＋</strong> and choose <strong>Scan QR code</strong>.</span></li><li><b>3</b><span>Scan this square, then enter the six-digit number shown on your phone.</span></li></ol>{mfaQrCode && <Image className="mfa-qr" src={mfaQrCode} width={210} height={210} alt="Authenticator setup QR code" unoptimized />}<details open><summary>Using this website on your phone or unable to scan?</summary><p>Choose “enter setup key” in your authenticator and paste this key:</p><code>{mfaSecret}</code></details></> : <><p className="modal-copy">Open your authenticator app and enter the current six-digit code for Surgical Society Pécs.</p><p className="mfa-help">The number changes every 30 seconds and works without mobile data.</p>{mfaFactors.length>1&&<label className="form-field"><span>Authenticator device</span><select value={mfaFactorId} onChange={event=>setMfaFactorId(event.target.value)}>{mfaFactors.map(factor=><option key={factor.id} value={factor.id}>{factor.label}</option>)}</select></label>}</>}<label className="form-field"><span>Six-digit authenticator code</span><input value={mfaCode} onChange={event => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" placeholder="000000" required /></label><button className="primary-button full-button" type="submit" disabled={authBusy}>{authBusy ? "Verifying…" : "Verify and continue →"}</button></form></ModalShell>}
       {modal === "privacy" && <ModalShell title="Privacy notice · draft for approval" onClose={() => setModal(null)} wide><PrivacyNotice /></ModalShell>}
       {toast && <Toast message={toast} onClose={() => setToast("")} />}

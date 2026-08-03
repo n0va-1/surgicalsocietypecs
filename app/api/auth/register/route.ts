@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { consumeRateLimit, isSameOriginRequest, isStrongPassword } from "@/lib/security";
+import { getSiteUrl } from "@/lib/site-url";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -37,7 +38,10 @@ export async function POST(request: Request) {
   const { data, error } = await signupClient.auth.signUp({
     email,
     password,
-    options: { data: { full_name: fullName } },
+    options: {
+      data: { full_name: fullName },
+      emailRedirectTo: `${getSiteUrl(request)}/?emailConfirmed=1`,
+    },
   });
   if (error || !data.user || data.user.identities?.length === 0) {
     await admin.rpc("restore_invite_code", { restored_invite_id: invite.invite_id });
