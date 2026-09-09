@@ -1,13 +1,13 @@
 @import "tailwindcss";
 
 * { box-sizing: border-box; }
-:root { --burgundy:#761c36; --burgundy-deep:#541125; --burgundy-soft:#f3e8ea; --orange:#f47a3c; --ink:#282326; --muted:#756d70; --line:#ded6d8; --paper:#faf6f3; --surface:#fffdfb; --green:#4d8a6d; }
+:root { --burgundy:#1c3f76; --burgundy-deep:#12274d; --burgundy-soft:#e7ecf5; --orange:#f47a3c; --ink:#282326; --muted:#756d70; --line:#ded6d8; --paper:#faf6f3; --surface:#fffdfb; --green:#4d8a6d; }
 html,body { margin:0; min-height:100%; }
 body { font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:var(--paper); }
 button,textarea,input { font:inherit; }
 button { color:inherit; }
 .site-shell { min-height:100vh; background:var(--paper); color:var(--ink); display:grid; grid-template-columns:264px minmax(0,1fr); transition:background .2s ease,color .2s ease; }
-.site-shell[data-theme="dark"],.auth-shell[data-theme="dark"] { --ink:#f3edee; --muted:#aaa2a5; --line:#493c40; --paper:#181416; --surface:#211a1d; --burgundy-soft:#392027; --burgundy:#a83d5b; --burgundy-deep:#e9a2b5; --green:#74b493; }
+.site-shell[data-theme="dark"],.auth-shell[data-theme="dark"] { --ink:#f3edee; --muted:#aaa2a5; --line:#493c40; --paper:#181416; --surface:#211a1d; --burgundy-soft:#1b2740; --burgundy:#5b84c4; --burgundy-deep:#a9c4ea; --green:#74b493; }
 .sidebar { position:fixed; inset:0 auto 0 0; width:264px; padding:27px 20px 22px; border-right:1px solid var(--line); background:var(--surface); display:flex; flex-direction:column; z-index:10; }
 .brand { display:flex; align-items:center; gap:12px; padding:0 8px 35px; }
 .brand strong { display:block; font-family:Georgia,"Times New Roman",serif; font-size:17px; font-weight:500; letter-spacing:-.2px; }
@@ -721,5 +721,5 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 @media print {
   body * { visibility:hidden!important; }
   .certificate-preview,.certificate-preview * { visibility:visible!important; }
-  .certificate-preview { position:fixed; inset:0; width:100%; min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px; border:8px double #71152d; background:#fff; color:#211b1d; }
+  .certificate-preview { position:fixed; inset:0; width:100%; min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:60px; border:8px double #12274d; background:#fff; color:#211b1d; }
 }
