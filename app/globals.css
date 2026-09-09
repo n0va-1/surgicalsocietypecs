@@ -198,7 +198,7 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 .auth-brand { display:flex; align-items:center; gap:13px; position:relative; z-index:1; }
 .auth-brand .official-logo { background:#fff; box-shadow:0 0 0 1px #ffffff40; }
 .auth-brand strong { display:block; font-family:Georgia,"Times New Roman",serif; font-size:17px; font-weight:400; }
-.auth-brand span { display:block; margin-top:3px; color:#e8cbd3; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; }
+.auth-brand span { display:block; margin-top:3px; color:#a9c4ea; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; }
 .auth-message { margin:auto 0 55px; position:relative; z-index:1; }
 .auth-message .eyebrow { color:#a9c4ea; }
 .auth-message h1 { max-width:500px; margin:0 0 20px; font-size:clamp(48px,5.7vw,78px); line-height:.98; letter-spacing:-2.6px; }
