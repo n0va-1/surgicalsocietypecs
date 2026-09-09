@@ -200,7 +200,7 @@ h1 { margin-bottom:8px; font-size:38px; letter-spacing:-1.1px; }
 .auth-brand strong { display:block; font-family:Georgia,"Times New Roman",serif; font-size:17px; font-weight:400; }
 .auth-brand span { display:block; margin-top:3px; color:#e8cbd3; font-size:9px; letter-spacing:1.5px; text-transform:uppercase; }
 .auth-message { margin:auto 0 55px; position:relative; z-index:1; }
-.auth-message .eyebrow { color:#edbdc9; }
+.auth-message .eyebrow { color:#a9c4ea; }
 .auth-message h1 { max-width:500px; margin:0 0 20px; font-size:clamp(48px,5.7vw,78px); line-height:.98; letter-spacing:-2.6px; }
 .auth-message > p { max-width:480px; margin:0; color:#eadde1; font-family:Georgia,"Times New Roman",serif; font-size:17px; line-height:1.65; }
 .auth-proof { border-top:1px solid #ffffff30; display:grid; grid-template-columns:1fr 1fr; gap:20px; padding-top:24px; position:relative; z-index:1; }
